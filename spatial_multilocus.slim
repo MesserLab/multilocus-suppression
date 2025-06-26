@@ -1,0 +1,566 @@
+// 2D spatial model 
+
+species all initialize() {
+
+	// Drive Parameters
+	defineCfgParam("MULTILOCUS", F); // if F, single locus dsx drive
+	
+	defineCfgParam("conversion_rate", 0.8);  // homing gene drive cut rate
+	defineCfgParam("resistance_rate", 0.0);  // fraction of cuts that become resistance alleles
+	defineCfgParam("drive_coeff", -0.2);  // selection coefficient of drive allele (cost of Cas9)
+	defineCfgParam("drive_dom", 0.5);  // dominance of drive allele
+	
+	// Multi-Loci Drive Parameters (if !MULTILOCUS, no cuts ever happen at these sites)
+	defineCfgParam("num_unlinked_loci", 20);
+	defineCfgParam("recomb_rate", 0.5);
+	defineCfgParam("disruption_rate", 0.05);  // non-functional alleles at target loci
+	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci
+	defineCfgParam("broken_coeff", -0.15);  // cost of disrupted allele at a target site 
+	
+	// Spatial:
+	defineCfgParam("NNI_PERCENTAGE", 0.5); // fraction of pop to use to calculate ANN
+	defineCfgParam("BETA", 10); // low-density growth rate
+	defineCfgParam("REPRISING_BOUNDARIES", T); // If F, toroidal boundaries are used
+	defineCfgParam("CAPACITY", 10000);
+	defineCfgParam("FORAGING_AREA", 0.01); // competition distance
+	defineCfgParam("NODES_PER_FORAGING_AREA", 1);	
+	defineCfgParam("MIGRATION_DISTANCE", 0.03); // also equal to the mating distance 
+
+	
+	// Drop parameters
+	defineConstant("DROP_GEN", 10);
+	defineCfgParam("DROP_SIZE", 201); 
+	defineCfgParam("DROP_RADIUS", 0.01);
+	defineConstant("HETEROZYGOUS_DROP", T);
+	defineConstant("NO_DROP", F); // Used to simulate only a wild-type population
+	
+	// Functions of other parameters
+	defineConstant("INDIVIDUALS_PER_FORAGING_AREA", FORAGING_AREA*CAPACITY);
+	defineConstant("FORAGING_RADIUS", sqrt(FORAGING_AREA/PI));
+	
+	// This simulation will use a non-Wright-Fisher model
+	initializeSLiMModelType("nonWF");
+
+	
+	// Foraging between nodes and animals
+	initializeInteractionType(1, "xy", reciprocal=T, maxDistance=FORAGING_RADIUS);
+	
+	// Mating -- only female animals feel this from male animals
+	initializeInteractionType(2, "xy", reciprocal=T, maxDistance=MIGRATION_DISTANCE, sexSegregation="FM");
+	
+	// Nearest neighbor
+	initializeInteractionType(4, "xy", reciprocal=T, maxDistance=1);
+	
+}
+
+species resource_node initialize(){
+	initializeSpecies(avatar="◼️", color="black");
+	if (REPRISING_BOUNDARIES)
+		initializeSLiMOptions(keepPedigrees = T, dimensionality = "xy");
+	else
+		initializeSLiMOptions(keepPedigrees=T, dimensionality="xy", periodicity="xy");
+
+}
+
+species animal initialize() {
+
+	initializeSpecies(avatar="🦟", color="yellow");
+	if (REPRISING_BOUNDARIES)
+		initializeSLiMOptions(keepPedigrees = T, dimensionality = "xy");
+	else
+		initializeSLiMOptions(keepPedigrees=T, dimensionality="xy", periodicity="xy");
+
+	initializeSex("A");
+
+	
+	// Chromosome Setup at the drive locus
+	// Three variations: Wild type, drive, r1 resistance
+	wt = initializeMutationType("m1", 0.5, "f", 0.0);  // wild-type allele
+	d = initializeMutationType("m2", 0.5, "f", 0.0);  // gene drive
+	r = initializeMutationType("m3", 0.5, "f", 0.0);  // functional resistance
+	
+	// Chromosome Setup at the target loci
+	// Three variations: Wild type, r1 resistance (functional), r2 resistance (broken/disrupted)
+	wt2 = initializeMutationType("m4", 1, "f", 0);  // wild-type at other loci
+	b = initializeMutationType("m5", 0, "f", 0);  // broken allele
+	f = initializeMutationType("m6", 0, "f", 0);  // functional allele
+	
+	// Setup the genome
+	initializeGenomicElementType("g1", c(wt, d, r), c(1, 1, 1));
+	initializeGenomicElementType("g2", c(wt2, b, f), c(1, 1, 1));
+	initializeGenomicElement(g1, 0, 0);
+	initializeGenomicElement(g2, 1, num_unlinked_loci);
+	
+	// do not allow mutation stacking or substitution
+	variations = c(wt, d, r, wt2, b, f);
+	variations.mutationStackGroup = 1;
+	variations.mutationStackPolicy = "l";
+	variations.convertToSubstitution = F;
+	
+	// No mutation in this model
+	initializeMutationRate(0);  // no outside mutations
+	initializeRecombinationRate(c(0.5, recomb_rate), c(1, num_unlinked_loci));  // linkage of the target loci
+
+}
+
+
+//// HELPER FUNCTION FOR CONSTANTS THAT MAY ALSO BE CONFIGURED VIA COMMAND LINE.
+function (void) defineCfgParam(string$ name, lifs value) {
+	if (!exists(name))
+		defineConstant(name, value);
+}
+
+
+function (float)averageNearestNeighbor(void){
+
+	adults = p2.individuals;
+	adult_popsize = p2.individualCount;
+	expected_distance = 0.5*sqrt((1)/adult_popsize); 
+	
+	i4.evaluate(p2);
+	
+	
+	nni = c();
+	
+	num_inds = asInteger(round(NNI_PERCENTAGE*adult_popsize));	
+
+	if (num_inds > 0) {
+	
+		if (NNI_PERCENTAGE < 1)
+			adults_sample = sample(x = adults, size = num_inds);
+		else
+			adults_sample = adults;
+
+		for (i in seqLen(num_inds)){
+			ind = adults_sample[i];
+			nearest_neighbor = i4.nearestNeighbors(ind, count = 1);
+			distance_nn = i4.distance(ind, nearest_neighbor);
+			nni_ind = distance_nn/expected_distance; // observed/expected distance
+			nni = c(nni, nni_ind);
+		}
+	
+		avg_NNI = mean(nni);
+		var_NNI = var(nni);
+	
+		return c(avg_NNI, var_NNI);
+	} else {
+		return NULL;
+	}
+	
+	
+}
+
+
+function (object) squareGridNodes(void) {
+	/*
+        Set up the node positions and resource values for the resource-explicit interaction.
+        Most of the complexity of this function is related to centering the nodes within the
+        modeled area. E.g., if tiling a 100.5 x 100.5 area with 1x1 nodes, a grid of 101x101
+        nodes is used, and they are centered in the area.
+        The amount of resources in nodes that are partially outside the area is
+        reduced according to how much area is missing from those nodes.
+    */
+	
+	// Vectors to store the x coordinates, y coordinates, and resource amounts at each resource node.
+	xs = c();
+	ys = c();
+	resources = c();
+	
+	// Some calculations to determine node size and inset from the edges of the modeled area.
+	animal_edge_length = 1;
+	node_side_length = sqrt(FORAGING_AREA / NODES_PER_FORAGING_AREA);
+	nodes_per_dimension = asInteger(animal_edge_length / node_side_length);
+	resources_per_node = INDIVIDUALS_PER_FORAGING_AREA / NODES_PER_FORAGING_AREA;
+	inset = node_side_length / 2;
+	// Cover the case when animal side length isn't a perfect multiple of the node side length:
+	if (abs(node_side_length * nodes_per_dimension - animal_edge_length) > 0.005 * node_side_length) {
+		nodes_per_dimension = nodes_per_dimension + 1;
+		inset = inset - (nodes_per_dimension * node_side_length - animal_edge_length) / 2;
+	}
+	
+	// Repeating sequences to be used for xs and resource values.
+	xrow = seq(inset, animal_edge_length, node_side_length);
+	resource_row = c(resources_per_node * (0.5 + inset / node_side_length), rep(resources_per_node, nodes_per_dimension - 2), resources_per_node * (0.5 + inset / node_side_length));
+	
+	// Assemble the xs, ys, and resource amounts.
+	for (y_index in seq(0, nodes_per_dimension - 1)) {
+		y = inset + y_index * node_side_length;
+		xs = c(xs, xrow);
+		ys = c(ys, rep(y, nodes_per_dimension));
+		if (y_index == 0 | y_index == nodes_per_dimension - 1)
+			resources = c(resources, resource_row * (0.5 + inset / node_side_length));
+		else
+			resources = c(resources, resource_row);
+	}
+	return Dictionary("xs", xs, "ys", ys, "resources", resources);
+}
+
+
+
+// rules for fitness based on genotype, assessed by male attractiveness or female fecundity
+function (f$)genotypeFitness(o<Individual>$ ind){
+	
+	// calculation of fitness at drive locus
+	num_drives = ind.countOfMutationsOfType(m2);
+	fitness = 1.0;
+	if (num_drives == 2) {
+		fitness = 1 + drive_coeff; // for females with DSX homing drive, 2 drive alleles means sterile
+	} else if (num_drives == 1) {
+		fitness = 1 + (drive_dom*drive_coeff);
+	}
+	
+	if (MULTILOCUS & ind.sex == "F"){
+		// fitness costs at the target loci for non-functional resistance
+		positions1 = ind.haploidGenome1.positionsOfMutationsOfType(m5);
+		positions2 = ind.haploidGenome2.positionsOfMutationsOfType(m5);
+		homozygous = setIntersection(positions1, positions2);
+		fitness = fitness * ((1.0 + broken_coeff)^size(homozygous));	
+	}
+	
+	// Return multiplicative fitness for individual with this genotype
+	return fitness;
+}
+
+ticks all 1 early(){
+	
+	// Get the coordinates and resource amounts for the resource nodes.
+	nodeData = squareGridNodes();
+	// Add the node population.
+	resource_node.addSubpop("p1", size(nodeData.getValue("resources")));
+	p1.setSpatialBounds(c(0, 0, 1, 1));
+	p1.individuals.x = nodeData.getValue("xs");
+	p1.individuals.y = nodeData.getValue("ys");
+	p1.individuals.tagF = nodeData.getValue("resources");
+		
+	
+	// Initialize the animal population.
+	// They all start wt and are scattered uniformly
+	animal.addSubpop("p2", CAPACITY);
+	p2.setSpatialBounds(c(0, 0, 1, 1));
+	p2.individuals.setSpatialPosition(p2.pointUniform(p2.individualCount));
+	p2.haplosomes.addNewDrawnMutation(m1, 0);
+	p2.haplosomes.addNewDrawnMutation(m4, 1:num_unlinked_loci);
+	all = p2.individuals;
+	all.color = "cornflowerblue";
+
+}
+
+
+
+
+// reproduction rules for each female: select a random mate, then generate offspring
+species animal reproduction(NULL, "F") {
+	
+	// dsx homing drive
+	if (!MULTILOCUS){
+		// dd females are sterile
+		if (individual.countOfMutationsOfType(m2) == 2)
+			return;
+	}		
+		
+	all_neighbors = i2.nearestNeighbors(individual, p2.individualCount);
+	male_neighbors = all_neighbors[all_neighbors.sex == "M"];
+	
+	num_neighbors = size(male_neighbors);
+	if (num_neighbors == 0)
+		return; // can't mate; leaves reproduction callback
+	
+	attempt_no = 0;
+	while (1) {
+		
+		// first, select a random mate
+		mate_no = rdunif(1, max=num_neighbors - 1);  // randomly choose male neighbor as mate
+		selected_mate = male_neighbors[mate_no];
+		
+		// evaluate his fitness		
+		male_attractiveness = genotypeFitness(selected_mate);
+		
+		// determine whether she choses him
+		if (runif(1) < male_attractiveness)
+			break; // leaves while-loop with this selected_mate
+		
+		attempt_no = attempt_no + 1;
+		
+		// after 10 candidates fail, female gives up 
+		if (attempt_no == 10)
+			return;  // leaves reproduction callback
+	}
+	
+	female_fitness = genotypeFitness(individual);
+	num_offspring = rbinom(n = 1, size = BETA, prob = female_fitness); // wild-types have BETA offspring on avg
+	
+	for (i in seqLen(num_offspring)) {
+		// Add offspring to the subpopulation.
+		offspring = subpop.addCrossed(individual, selected_mate);
+	}
+	
+}
+
+species animal modifyChild() {
+
+	// Germline processes in mother
+	parent_dw = parent1.countOfMutationsOfType(m2) == 1 & parent1.countOfMutationsOfType(m1) == 1;
+	wt_child = child.haploidGenome1.countOfMutationsOfType(m1) == 1;
+	if (parent_dw & wt_child){
+		// cleavage
+		if (runif(1) < conversion_rate){
+			
+			// cut becomes a resistance allele
+			if (runif(1) < resistance_rate){
+					child.haploidGenome1.addNewDrawnMutation(m3, 0);  // functional resistance
+			} else {
+				// HDR to introduce the drive allele
+				child.haploidGenome1.addNewDrawnMutation(m2, 0);
+			}
+		}
+	}
+	
+	// Germline processes in father
+	parent_dw = parent2.countOfMutationsOfType(m2) == 1 & parent2.countOfMutationsOfType(m1) == 1;
+	wt_child = child.haploidGenome2.countOfMutationsOfType(m1) == 1;
+	if (parent_dw & wt_child){
+		// cleavage
+		if (runif(1) < conversion_rate){
+			
+			// cut becomes a resistance allele
+			if (runif(1) < resistance_rate){
+					child.haploidGenome2.addNewDrawnMutation(m3, 0);  // functional resistance
+			} else {
+				// HDR to introduce the drive allele
+				child.haploidGenome2.addNewDrawnMutation(m2, 0);
+			}
+		}
+	}
+		
+	// If mother had a drive allele, it may have cleaved the wild-type targets 
+	// the child inherited from her
+	if (MULTILOCUS){
+		if (parent1.countOfMutationsOfType(m2) > 0){
+		
+			// Maternal Chromosome Conversions
+			// chance of converting some other wt2 alleles in genome 1
+			disrupt_chance = (runif(num_unlinked_loci) < disruption_rate);
+			resist_chance = (runif(num_unlinked_loci) < func_resist_rate);
+		
+			// positions of the maternal wild-type alleles
+			wt2_pos = child.haploidGenome1.positionsOfMutationsOfType(m4);
+			wt2_pos = (match(1:num_unlinked_loci, wt2_pos) >= 0);
+		
+			// potential allele conversions positions
+			disrupt_convert = (disrupt_chance & !resist_chance & wt2_pos);
+			resist_convert = (disrupt_chance & resist_chance & wt2_pos);
+		
+			// make the conversions
+			if (sum(disrupt_convert)){
+				child.haploidGenome1.addNewDrawnMutation(m5, (1:num_unlinked_loci)[disrupt_convert]);}
+			if (sum(resist_convert)){
+				child.haploidGenome1.addNewDrawnMutation(m6, (1:num_unlinked_loci)[resist_convert]);}
+		}
+
+		// If father had a drive allele, it may have cleaved the wild-type targets 
+		// the child inherited from him
+		if (parent2.countOfMutationsOfType(m2) > 0){
+		
+			// Paternal Chromosome Conversions
+			// chance of converting some other wt2 alleles in genome 1
+			disrupt_chance = (runif(num_unlinked_loci) < disruption_rate);
+			resist_chance = (runif(num_unlinked_loci) < func_resist_rate);
+		
+			// positions of the paternal wild-type alleles
+			wt2_pos = child.haploidGenome2.positionsOfMutationsOfType(m4);
+			wt2_pos = (match(1:num_unlinked_loci, wt2_pos) >= 0);
+		
+			// potential allele conversions positions
+			disrupt_convert = (disrupt_chance & !resist_chance & wt2_pos);
+			resist_convert = (disrupt_chance & resist_chance & wt2_pos);
+		
+			// make the conversions
+			if (sum(disrupt_convert)){
+				child.haploidGenome2.addNewDrawnMutation(m5, (1:num_unlinked_loci)[disrupt_convert]);}
+			if (sum(resist_convert)){
+				child.haploidGenome2.addNewDrawnMutation(m6, (1:num_unlinked_loci)[resist_convert]);}
+		}
+	}
+	
+	// Color Rules
+	// shades of pink for the broken target alleles and green for the resistant alleles
+	if (child.countOfMutationsOfType(m5) > 1.5*num_unlinked_loci)
+		child.color = "orchid3";
+	else if (child.countOfMutationsOfType(m6) > 1.5*num_unlinked_loci)
+		child.color = "palegreen4";
+	else if (child.countOfMutationsOfType(m5) > num_unlinked_loci)
+		child.color = "orchid1";
+	else if (child.countOfMutationsOfType(m6) > num_unlinked_loci)
+		child.color = "palegreen2";
+	else if (child.countOfMutationsOfType(m2) == 1)
+		child.color = "orange";  // drive heterozygote
+	else if (child.countOfMutationsOfType(m2) == 2)
+		child.color = "red";  // drive homozygote
+	else if (child.countOfMutationsOfType(m3) == 2)
+		child.color = "purple3";  // functional resistance at the drive locus
+	else
+		child.color = "cornflowerblue";  // wt or heterozygote or other
+	
+	return T;
+}
+
+// Foraging (do this after gen 1, when nodes are set up)
+ticks all 2: early() {
+
+	// Eliminate adults
+	animal.killIndividuals(p2.individuals[p2.individuals.age>0]);
+	
+	// Evaluate larvae at nodes
+	i1.evaluate(c(p2,p1));
+	
+	// Each node gives tickets randomly individuals within range.
+	// Individuals who forage from more or fewer nodes are proportionately
+	// more or less likely to get a ticket from those nodes.
+	p2.individuals.fitnessScaling = 0.0;
+	p2.individuals.tag = 0;
+	for (node in p1.individuals) {
+		customers = i1.nearestNeighbors(node, p2.individualCount, p2);
+		node.setValue("customers", customers.index);
+		customers.tag = customers.tag + 1;  // Count how many nodes each individual reaches.
+	}
+	// Now distribute the tickets.
+	for (node in p1.individuals) {
+		customers = p2.individuals[node.getValue("customers")];
+		// Only give tickets to individuals who don't have them.
+		customers = customers[customers.fitnessScaling == 0.0];
+		num_suitable = size(customers);
+		num_resources = asInteger(round(node.tagF));
+		
+		if (num_suitable < num_resources){
+			ticket_winners = customers;
+			ticket_winners.fitnessScaling = 1.0;
+		} else {
+			ticket_winners = sample(customers, asInteger(round(node.tagF)), weights=1/customers.tag);
+			ticket_winners.fitnessScaling = 1.0;
+		}	
+	}
+	
+}
+
+
+ticks all late(){
+
+	// Surviving offspring now move
+	all = p2.individuals;
+	gen = animal.cycle;
+	
+	if (REPRISING_BOUNDARIES){
+		for (ind in all){
+			do new_pos = ind.spatialPosition + rnorm(2, 0, MIGRATION_DISTANCE);
+			while (!p2.pointInBounds(new_pos)); 
+			ind.setSpatialPosition(new_pos);	
+		}
+	} else {
+		for (ind in all){
+			new_pos = ind.spatialPosition + rnorm(2, 0, MIGRATION_DISTANCE);
+			ind.setSpatialPosition(p2.pointPeriodic(new_pos));
+		}
+	}
+	
+	// Drop drive
+	if (gen == DROP_GEN & !NO_DROP){
+		// create a temporary population of modified adults
+		animal.addSubpop("p3", asInteger(DROP_SIZE));
+		drop = p3.individuals;
+	
+		// center the drop in a circle at the middle
+		for (ind in drop) {
+			if (REPRISING_BOUNDARIES) {
+				do new_pos = c(0.5, 0.5) + rnorm(2, 0, DROP_RADIUS);
+				while (!p2.pointInBounds(new_pos));
+				ind.setSpatialPosition(new_pos);
+			} else {
+				// Toroidal placement.
+				new_pos = c(0.5, 0.5) + rnorm(2, 0, DROP_RADIUS);
+				ind.setSpatialPosition(p2.pointPeriodic(new_pos));
+			}
+		}
+		
+		// For heterozygous drop, one of the chromosomes is set to wild type:
+		if (HETEROZYGOUS_DROP){
+			drop.haploidGenome1.addNewDrawnMutation(m2, 0);  // one drive allele
+			drop.haploidGenome2.addNewDrawnMutation(m1, 0);  // one wild-type allele
+			drop.haplosomes.addNewDrawnMutation(m4, 1:num_unlinked_loci);  // wild-type everywhere else
+			drop.color = "orange";
+		} else {
+			drop.haplosomes.addNewDrawnMutation(m2, 0);  // two drive alleles
+			drop.haplosomes.addNewDrawnMutation(m4, 1:num_unlinked_loci);  // wild-type everywhere else
+			drop.color = "red";
+		}
+	
+		// move modified individuals into the wild-type population
+		p2.takeMigrants(drop);  // add them to p1
+		p3.removeSubpopulation();
+	} // end drop
+	
+	
+	
+	i2.evaluate(p2); // for next generation's mating
+	
+	
+	// Output
+	// Calculate rates that we are interested in:
+	all = p2.individuals;
+	pop_size = p2.individualCount;
+	num_wt = sum(all.countOfMutationsOfType(m1));
+	num_dr = sum(all.countOfMutationsOfType(m2));
+	num_r1 = sum(all.countOfMutationsOfType(m3));
+	
+	rate_wt = num_wt / (2*pop_size);
+	rate_dr = num_dr / (2*pop_size);
+	rate_r1 = num_r1 / (2*pop_size);
+	
+	// Calculate additional rates for target loci:
+	num_wt2 = sum(all.countOfMutationsOfType(m4));
+	num_b = sum(all.countOfMutationsOfType(m5));
+	num_f = sum(all.countOfMutationsOfType(m6));
+	
+	rate_wt2 = num_wt2 / (2*pop_size*num_unlinked_loci);
+	rate_b = num_b / (2*pop_size*num_unlinked_loci);
+	rate_f = num_f / (2*pop_size*num_unlinked_loci);
+	
+	// Output for humans to look at:
+	catn("------------------------");
+	catn("gen: " + gen + "\tsize: " + pop_size + "\nwt: " + rate_wt + "\tdr: " + rate_dr + "\tr1: " + rate_r1 + "\nwt2: " + rate_wt2 + "\tbr: " + rate_b + "\tfr: " + rate_f);
+	catn("Number of drive alleles present: " + num_dr);
+	catn("Number of broken alleles present: " + num_b);
+	
+	nni_info = averageNearestNeighbor();
+	
+	if (!isNULL(nni_info)){
+		ann = nni_info[0];
+		vnn = nni_info[1];
+		catn("Average NNI: " + ann);
+		catn("Variance in NNI: " + vnn);
+	}
+	
+	// End Conditions (once the drive has been released)
+	
+	if (gen > DROP_GEN){
+		// drive was lost and wt population remained = suppression failed
+		// but also need to consider the rate of broken alleles in the population
+		if (!NO_DROP & num_dr==0 & pop_size>0 & rate_b<0.01) {
+			catn("POP_PERSISTS:: " + gen);
+			community.simulationFinished();
+		}
+		
+		// suppression occurs
+		if (pop_size == 0){
+			catn("SUPPRESSED:: " + gen);
+			community.simulationFinished();
+		}
+	}	
+	
+}
+
+
+// End Condition Time Out
+ticks all 500 late() {
+	catn("SIMULATION TIMED OUT:: " + animal.cycle);
+	community.simulationFinished();
+}
