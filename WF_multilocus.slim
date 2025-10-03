@@ -1,23 +1,25 @@
 initialize(){
 	// directory for data storage (folder must be created in advance)	
-	if (!exists("path")) defineConstant("path", "/path/to/data/storage/folder/");	
+	if (!exists("path")) defineConstant("path", "/Users/rachelgoodridge/Library/CloudStorage/Box-Box/Messer_Lab_Rotation/");	
 	
 	// general constants
 	if (!exists("population_size")) defineConstant("population_size", 1e4);
 	if (!exists("release_size")) defineConstant("release_size", 100);
-	if (!exists("recomb_rate")) defineConstant("recomb_rate", 1e-6);
+	if (!exists("recomb_rate")) defineConstant("recomb_rate", 1e-5);
 	
 	// constants for drive locus
-	if (!exists("resistance_rate")) defineConstant("resistance_rate", 0.01);  // functional resistance at drive locus
-	if (!exists("conversion_rate")) defineConstant("conversion_rate", 1);  // cleavage rate of wild-type allele
+	if (!exists("resistance_rate")) defineConstant("resistance_rate", 0.001);  // functional resistance at drive locus
+	if (!exists("cleavage_rate")) defineConstant("cleavage_rate", 0.90);  // cleavage rate of wild-type allele
 	if (!exists("drive_coeff")) defineConstant("drive_coeff", -0.1);  // selection coefficient of drive allele
 	if (!exists("drive_dom")) defineConstant("drive_dom", 0.5);  // dominance of drive allele
 	
 	// constants for distant target loci
 	if (!exists("num_target_loci")) defineConstant("num_target_loci", 20);  // either linked or unlinked
 	if (!exists("disruption_rate")) defineConstant("disruption_rate", 0.2);  // non-functional alleles at target loci
-	if (!exists("func_resist_rate")) defineConstant("func_resist_rate", 0.01);  // functional alleles at target loci	
+	if (!exists("func_resist_rate")) defineConstant("func_resist_rate", 0.001);  // functional alleles at target loci	
 	if (!exists("broken_coeff")) defineConstant("broken_coeff", -0.15);  // cost of disrupted allele at a target site
+	if (!exists("sd_broken_coeff")) defineConstant("sd_broken_coeff", 0);  // sd of rnorm for fitness cost
+	if (!exists("broken_dom")) defineConstant("broken_dom", 0);  // dominance of disrupted allele at a target site
 	
 	// setup mutation types
 	initializeMutationRate(0);  // no outside mutations
@@ -54,11 +56,11 @@ initialize(){
 	defineConstant("file_name", path + date_time + "_" + seed + "_output.csv");
 	
 	// create a parameters file
-	file_text = "population_size: " + population_size + "\nrelease_size: " + release_size +
-		"\nrecomb_rate: " + recomb_rate + "\nresistance_rate: " + resistance_rate +
-		"\nconversion_rate: " + conversion_rate + "\ndrive_coeff: " + drive_coeff + "\ndrive_dom: " +
-		drive_dom + "\nnum_target_loci: " + num_target_loci + "\ndisruption_rate: " +
-		disruption_rate + "\nfunc_resist_rate: " + func_resist_rate + "\nbroken_coeff: " + broken_coeff;
+	file_text = "population_size: " + population_size + "\nrelease_size: " + release_size + "\nrecomb_rate: " +
+		recomb_rate + "\nresistance_rate: " + resistance_rate + "\ncleavage_rate: " + cleavage_rate +
+		"\ndrive_coeff: " + drive_coeff + "\ndrive_dom: " + drive_dom + "\nnum_target_loci: " + num_target_loci +
+		"\ndisruption_rate: " + disruption_rate + "\nfunc_resist_rate: " + func_resist_rate + "\nbroken_coeff: " +
+		broken_coeff + "\nsd_broken_coeff: " + sd_broken_coeff + "\nbroken_dom: " + broken_dom;
 	if (!writeFile(path + date_time + "_" + seed + "_parameters.txt", file_text)){
 		stop("Error writing parameters file.");}
 }
@@ -106,7 +108,7 @@ initialize(){
 	// child genome 1 wt and heterozygote parent 1
 	if (child1_wt & parent1_wt & parent1_d){
 		// cleavage
-		if (runif(1) < conversion_rate){
+		if (runif(1) < cleavage_rate){
 			// cut becomes a resistance allele
 			if (runif(1) < resistance_rate){
 					child.genome1.addNewDrawnMutation(m3, 0);}  // new m3 mutation
@@ -117,7 +119,7 @@ initialize(){
 	// child genome 2 wt and heterozygote parent 2
 	if (child2_wt & parent2_wt & parent2_d){
 		// cleavage
-		if (runif(1) < conversion_rate){
+		if (runif(1) < cleavage_rate){
 			// cut becomes a resistance allele
 			if (runif(1) < resistance_rate){
 					child.genome2.addNewDrawnMutation(m3, 0);}  // new m3 mutation
@@ -217,14 +219,28 @@ initialize(){
 	// first make a fitness placeholder with no effect
 	ind_fitness = 1.0;
 	
-	// make two broken alleles at the same locus have reduced fitness
+	// count homozygous and heterozygous broken alleles
 	if (num_target_loci > 0){
 		positions1 = individual.genome1.positionsOfMutationsOfType(m5);
 		positions2 = individual.genome2.positionsOfMutationsOfType(m5);
-		homozygous = setIntersection(positions1, positions2);
-		if (size(homozygous)){ind_fitness = (1.0+broken_coeff)^size(homozygous);}
+		homozygous = size(setIntersection(positions1, positions2));
+		heterozygous = size(positions1) + size(positions2) - (2*homozygous);
+		
+		// create some fitness cost for homozygous deleterious mutations
+		if (homozygous){
+			fitness_costs = rnorm(homozygous, (1.0 + broken_coeff), sd_broken_coeff);
+			fitness_costs[fitness_costs > 1] = 2 - fitness_costs[fitness_costs > 1];  // do not allow beneficial mutations (reflect)
+			ind_fitness = ind_fitness*product(abs(fitness_costs));  // do not allow negative fitness either
+		}
+		
+		// create some fitness cost for heterozygous deleterious mutations
+		if (heterozygous & broken_dom){
+			fitness_costs = rnorm(heterozygous, broken_coeff, sd_broken_coeff);
+			fitness_costs = (1.0 + (broken_dom*fitness_costs));
+			fitness_costs[fitness_costs > 1] = 2 - fitness_costs[fitness_costs > 1];  // do not allow beneficial mutations (reflect)
+			ind_fitness = ind_fitness*product(abs(fitness_costs));  // do not allow negative fitness either
+		}
 	}
-	
 	return ind_fitness;
 }
 
