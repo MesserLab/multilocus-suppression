@@ -1,9 +1,12 @@
 // 2D spatial model 
 
 species all initialize() {
-
+	//setSeed(7854733400776319731); bothsex
+	setSeed(8747163808839730642); // multilocus
+	
 	// Drive Parameters
-	defineCfgParam("MULTILOCUS", F); // if F, single locus dsx drive
+	defineCfgParam("MULTILOCUS", T); // if F, single locus dsx drive
+	defineCfgParam("BOTH_SEX_STERILE", F); // if T and MULTILOCUS=F, both males and females with 2 drive alleles are sterile
 	
 	defineCfgParam("conversion_rate", 0.8);  // homing gene drive cut rate
 	defineCfgParam("resistance_rate", 0.0);  // fraction of cuts that become resistance alleles
@@ -11,25 +14,37 @@ species all initialize() {
 	defineCfgParam("drive_dom", 0.5);  // dominance of drive allele
 	
 	// Multi-Loci Drive Parameters (if !MULTILOCUS, no cuts ever happen at these sites)
-	defineCfgParam("num_unlinked_loci", 20);
-	defineCfgParam("recomb_rate", 0.5);
-	defineCfgParam("disruption_rate", 0.05);  // non-functional alleles at target loci
-	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci
-	defineCfgParam("broken_coeff", -0.15);  // cost of disrupted allele at a target site 
+	defineCfgParam("num_unlinked_loci", 10);
+	defineCfgParam("recomb_rate", 1e-8);
+	defineCfgParam("disruption_rate", 1/num_unlinked_loci);  // non-functional alleles at target loci
+	defineCfgParam("func_resist_rate", 0.001);  // functional alleles at target loci
+	defineCfgParam("broken_coeff", -0.2);  // cost of disrupted allele at a target site 
+	defineCfgParam("broken_dom", 0.0);
 	
 	// Spatial:
 	defineCfgParam("NNI_PERCENTAGE", 0.5); // fraction of pop to use to calculate ANN
-	defineCfgParam("BETA", 10); // low-density growth rate
 	defineCfgParam("REPRISING_BOUNDARIES", T); // If F, toroidal boundaries are used
-	defineCfgParam("CAPACITY", 10000);
-	defineCfgParam("FORAGING_AREA", 0.01); // competition distance
-	defineCfgParam("NODES_PER_FORAGING_AREA", 1);	
-	defineCfgParam("MIGRATION_DISTANCE", 0.03); // also equal to the mating distance 
-
+	defineCfgParam("CAPACITY", 50000);
+	defineCfgParam("SPEED", 0.03); // SD of dispersal kernel and used as max distance for sampling mates - must exceed foraging or density interaction radius
+	defineConstant("MATING_DISTANCE", SPEED);
+	
+	// Density control
+	defineCfgParam("RESOURCE_MODEL", F); // if F, regulate through female fecundity
+	defineCfgParam("MAX_NUM_OFFSPRING", 50); 	
+	
+	// Fecundity-model parameters (used if RESOURCE_MODEL is F)
+	defineCfgParam("DENSITY_INTERACTION_DISTANCE", 0.01); // if !RESOURCE_MODEL, this is used to evaluate female's competition
+	defineCfgParam("BETA", 15); // must be less than 0.5*MAX_NUM_OFFSPRING -- 2 x BETA is the avg num offspring wt females have in empty areas
+	defineConstant("EXPECTED_ADULT_COMPETITION", CAPACITY*PI*(DENSITY_INTERACTION_DISTANCE^2));
+	
+	// Resource-model parameters (use if RESOURCE_MODEL=T)
+	// MAX_NUM_OFFSPRING is the maximum # of offspring for a wild-type, but 2 is the average
+	defineCfgParam("FORAGING_AREA", PI*(0.01^2)); // competition distance
+	defineCfgParam("NODES_PER_FORAGING_AREA", 1);		
 	
 	// Drop parameters
 	defineConstant("DROP_GEN", 10);
-	defineCfgParam("DROP_SIZE", 201); 
+	defineCfgParam("DROP_SIZE", 1101); 
 	defineCfgParam("DROP_RADIUS", 0.01);
 	defineConstant("HETEROZYGOUS_DROP", T);
 	defineConstant("NO_DROP", F); // Used to simulate only a wild-type population
@@ -46,10 +61,15 @@ species all initialize() {
 	initializeInteractionType(1, "xy", reciprocal=T, maxDistance=FORAGING_RADIUS);
 	
 	// Mating -- only female animals feel this from male animals
-	initializeInteractionType(2, "xy", reciprocal=T, maxDistance=MIGRATION_DISTANCE, sexSegregation="FM");
+	initializeInteractionType(2, "xy", reciprocal=T, maxDistance= SPEED, sexSegregation="FM");
+	
+	// Competition radius when density regulates female fecundity
+	initializeInteractionType(3, "xy", reciprocal=T, maxDistance= DENSITY_INTERACTION_DISTANCE);	
 	
 	// Nearest neighbor
 	initializeInteractionType(4, "xy", reciprocal=T, maxDistance=1);
+	
+	
 	
 }
 
@@ -124,7 +144,7 @@ function (float)averageNearestNeighbor(void){
 	
 	num_inds = asInteger(round(NNI_PERCENTAGE*adult_popsize));	
 
-	if (num_inds > 0) {
+	if (num_inds > 1) {
 	
 		if (NNI_PERCENTAGE < 1)
 			adults_sample = sample(x = adults, size = num_inds);
@@ -215,6 +235,9 @@ function (f$)genotypeFitness(o<Individual>$ ind){
 		positions2 = ind.haploidGenome2.positionsOfMutationsOfType(m5);
 		homozygous = setIntersection(positions1, positions2);
 		fitness = fitness * ((1.0 + broken_coeff)^size(homozygous));	
+		
+		heterozygous = setDifference(positions1, positions2);
+		fitness = fitness*((1.0 + broken_coeff*broken_dom)^size(heterozygous));
 	}
 	
 	// Return multiplicative fitness for individual with this genotype
@@ -251,7 +274,7 @@ ticks all 1 early(){
 // reproduction rules for each female: select a random mate, then generate offspring
 species animal reproduction(NULL, "F") {
 	
-	// dsx homing drive
+	// Single locus homing suppression drive where female homozygotes are sterile
 	if (!MULTILOCUS){
 		// dd females are sterile
 		if (individual.countOfMutationsOfType(m2) == 2)
@@ -287,7 +310,27 @@ species animal reproduction(NULL, "F") {
 	}
 	
 	female_fitness = genotypeFitness(individual);
-	num_offspring = rbinom(n = 1, size = BETA, prob = female_fitness); // wild-types have BETA offspring on avg
+	
+	if (BOTH_SEX_STERILE & !MULTILOCUS){
+		if (selected_mate.countOfMutationsOfType(m2) == 2)
+			return; // produces 0 offspring if she samples a sterile male
+	}	
+	
+	if (RESOURCE_MODEL){
+		num_offspring = rbinom(n = 1, size = 2*BETA, prob = female_fitness); // wild-types have BETA offspring on avg
+	} else {
+		// fecundity is regulated based on number of competitors around the female
+		adult_density_force = i3.totalOfNeighborStrengths(individual);
+		competition_ratio = adult_density_force / EXPECTED_ADULT_COMPETITION;
+		actual_competition_factor = BETA/ ((BETA-1) * competition_ratio + 1);
+	
+		// Offspring number based on binomial distrobution.
+		// p for binomial draw. Number of offspring varies with female genes and competition.
+		p = genotypeFitness(individual) * actual_competition_factor * (2/MAX_NUM_OFFSPRING);
+		num_offspring = rbinom(1, size = MAX_NUM_OFFSPRING, prob = p);
+	
+	}	
+	
 	
 	for (i in seqLen(num_offspring)) {
 		// Add offspring to the subpopulation.
@@ -410,6 +453,9 @@ ticks all 2: early() {
 	// Eliminate adults
 	animal.killIndividuals(p2.individuals[p2.individuals.age>0]);
 	
+	if (!RESOURCE_MODEL)
+		return;	
+	
 	// Evaluate larvae at nodes
 	i1.evaluate(c(p2,p1));
 	
@@ -451,13 +497,13 @@ ticks all late(){
 	
 	if (REPRISING_BOUNDARIES){
 		for (ind in all){
-			do new_pos = ind.spatialPosition + rnorm(2, 0, MIGRATION_DISTANCE);
+			do new_pos = ind.spatialPosition + rnorm(2, 0, SPEED);
 			while (!p2.pointInBounds(new_pos)); 
 			ind.setSpatialPosition(new_pos);	
 		}
 	} else {
 		for (ind in all){
-			new_pos = ind.spatialPosition + rnorm(2, 0, MIGRATION_DISTANCE);
+			new_pos = ind.spatialPosition + rnorm(2, 0, SPEED);
 			ind.setSpatialPosition(p2.pointPeriodic(new_pos));
 		}
 	}
@@ -501,6 +547,7 @@ ticks all late(){
 	
 	
 	i2.evaluate(p2); // for next generation's mating
+	i3.evaluate(p2);
 	
 	
 	// Output
