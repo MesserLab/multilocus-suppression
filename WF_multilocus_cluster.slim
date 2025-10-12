@@ -1,0 +1,358 @@
+initialize(){
+	// directory for data storage (folder must be created in advance)	
+	defineCfgParam("make_csv", 0);
+	defineCfgParam("path", getwd());
+	
+	// general constants
+	defineCfgParam("population_size", 1e4);
+	defineCfgParam("release_size", 200); // represents a 1% drive allele frequency
+	defineCfgParam("recomb_rate", 0.5);
+	defineCfgParam("shared_cas9", 1); // whether cas9 is shared between the drive site and target sites
+	defineCfgParam("baseline_cleavage_rate", 1.0); // max cleavage rate for no saturation
+	defineCfgParam("saturation_factor", 0.5);
+	
+	// constants for drive locus
+	defineCfgParam("resistance_rate", 0.001);  // functional resistance at drive locus
+	defineCfgParam("drive_coeff", -0.1);  // selection coefficient of drive allele
+	defineCfgParam("drive_dom", 0.5);  // dominance of drive allele
+	defineCfgParam("drive_cleavage_rate", 1.0); // drive_cut_rate if shared_cas9 = F
+	
+	// constants for distant target loci
+	defineCfgParam("num_target_loci", 10);  // either linked or unlinked
+	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci	
+	defineCfgParam("broken_coeff", -1.0);  // cost of disrupted allele at a target site
+	defineCfgParam("sd_broken_coeff", 0);  // sd of rnorm for fitness cost
+	defineCfgParam("broken_dom", 0);  // dominance of disrupted allele at a target site
+	
+	// constants for tracking output
+	defineCfgParam("recovery_val", 0.99); // when fitness reaches this or above, population is "recovered"
+	
+	// constants based on other define constants
+	defineConstant("cleavage_rate", ifelse(shared_cas9==1, baseline_cleavage_rate/((num_target_loci + 1)^(saturation_factor)), baseline_cleavage_rate/((num_target_loci)^(saturation_factor))));
+	defineConstant("disruption_rate", cleavage_rate);  // creating non-functional alleles at target loci
+	defineConstant("drive_cut_rate", ifelse(shared_cas9==1, cleavage_rate, drive_cleavage_rate)); // cutting the wild-type allele at drive locus
+	
+	defineGlobal("fitness_below_val", F);
+	defineGlobal("fitness_rose_above_val", F);
+	defineGlobal("time_to_recovery", -1);
+	defineGlobal("fitness_track", c());
+	
+	catn("==============================");
+	catn(paste("TARGET_CUT_RATE::", disruption_rate, "DRIVE_CUT_RATE::", drive_cut_rate));
+	catn("==============================");
+	
+	// setup mutation types
+	initializeMutationRate(0);  // no outside mutations
+	wt = initializeMutationType("m1", 1, "f", 0);  // wild-type allele
+	d = initializeMutationType("m2", drive_dom, "f", drive_coeff);  // gene drive
+	r = initializeMutationType("m3", 1, "f", 0);  // resistance allele
+	wt2 = initializeMutationType("m4", 1, "f", 0);  // wild-type at other loci
+	b = initializeMutationType("m5", 1, "f", 0);  // broken allele
+	f = initializeMutationType("m6", 1, "f", 0);  // functional allele
+	
+	// setup the genome
+	initializeGenomicElementType("g1", c(wt, d, r), c(1, 1, 1));
+	initializeGenomicElementType("g2", c(wt2, b, f), c(1, 1, 1));
+	initializeGenomicElement(g1, 0, 0);
+	if (num_target_loci > 0) {initializeGenomicElement(g2, 1, num_target_loci);}
+	if (num_target_loci > 1) {initializeRecombinationRate(c(0.5, recomb_rate), c(1, num_target_loci));}
+	else {initializeRecombinationRate(0.5);}  // 0.5 = unlinked loci
+	
+	// do not allow mutation stacking or substitution
+	variations = c(wt, d, r, wt2, b, f);
+	variations.mutationStackGroup = 1;
+	variations.mutationStackPolicy = "l";
+	variations.convertToSubstitution = F;
+	
+	// setup the output file
+	
+	if (make_csv){
+		if (num_target_loci > 0){file = "gen_num, mean_fit, wt_rate, drive_rate, resist_rate, " +
+				"wt2_rate, broken_rate, func_rate\n";}
+		else {file = "gen_num, mean_fit, wt_rate, drive_rate, resist_rate\n";}
+		defineGlobal("output", file);
+		
+		//determine the file name
+		date_time = paste0(c(rev(strsplit(date(), sep="-")), strsplit(time(), sep=":")));
+		seed = getSeed();
+		defineConstant("file_name", path + date_time + "_" + seed + "_output.csv");
+		
+		// create a parameters file
+		file_text = "population_size: " + population_size + "\nrelease_size: " + release_size + "\nrecomb_rate: " +
+			recomb_rate + "\nresistance_rate: " + resistance_rate + "\ncleavage_rate: " + cleavage_rate +
+			"\ndrive_coeff: " + drive_coeff + "\ndrive_dom: " + drive_dom + "\nnum_target_loci: " + num_target_loci +
+			"\ndisruption_rate: " + disruption_rate + "\nfunc_resist_rate: " + func_resist_rate + "\nbroken_coeff: " +
+			broken_coeff + "\nsd_broken_coeff: " + sd_broken_coeff + "\nbroken_dom: " + broken_dom;
+		if (!writeFile(path + date_time + "_" + seed + "_parameters.txt", file_text)){
+			stop("Error writing parameters file.");}
+	}
+
+}
+
+function (void) defineCfgParam(string$ name, lifs value) {
+	
+	if (!exists(name))
+		defineConstant(name, value);
+}
+
+1 early(){
+	// create population
+	sim.addSubpop("p1", population_size);
+}
+
+1 late(){
+	// give all individuals the wild-type allele
+	p1.haplosomes.addNewDrawnMutation(m1, 0);
+	
+	// put the second wild-type allele at all the other loci
+	if (num_target_loci > 0){
+		p1.haplosomes.addNewDrawnMutation(m4, 1:num_target_loci);}
+}
+
+100 late(){
+	// introduce the gene drive to a random sample of the population in heterozygous state (0.5% frequency)
+	target = sample(p1.individuals, release_size);
+	mut = target.haploidGenome1.addNewDrawnMutation(m2, 0);
+	defineConstant("DRIVE", mut);
+}
+
+100:10000 early(){
+	// contribute to output file
+	if (make_csv)
+		defineGlobal("new_line", paste(c(sim.cycle, mean(p1.cachedFitness(NULL))), sep=", "));
+	
+	// store the fitness value
+	defineGlobal("fitness", mean(p1.cachedFitness(NULL)));
+	defineGlobal("fitness_track", c(fitness_track, fitness));
+	
+	if (fitness <= recovery_val & !fitness_below_val){
+		catn("========================================");
+		catn(paste("fitness_below_val_AT_GEN:", sim.cycle - 100));
+		catn("========================================");
+		defineGlobal("fitness_below_val", T);
+	}
+	
+	if (fitness >= recovery_val & fitness_below_val & !fitness_rose_above_val){
+		defineGlobal("time_to_recovery", sim.cycle - 100);
+		catn("========================================");
+		catn(paste("FITNESS_RECOVERED_AT_GEN:", time_to_recovery));
+		catn("========================================");
+		defineGlobal("fitness_rose_above_val", T);
+	}
+
+}
+
+100:10000 modifyChild(){
+	// need to find the heterozygote (wt/d or d/wt) parents
+	parent1_wt = sum(parent1.haplosomes.countOfMutationsOfType(m1)) == 1;
+	parent1_d = sum(parent1.haplosomes.countOfMutationsOfType(m2)) == 1;
+	parent2_wt = sum(parent2.haplosomes.countOfMutationsOfType(m1)) == 1;
+	parent2_d = sum(parent2.haplosomes.countOfMutationsOfType(m2)) == 1;
+	
+	// look at all wild-type alleles in the child
+	child1_wt = child.haploidGenome1.countOfMutationsOfType(m1) == 1;
+	child2_wt = child.haploidGenome2.countOfMutationsOfType(m1) == 1;
+	
+	// child genome 1 wt and heterozygote parent 1
+	if (child1_wt & parent1_wt & parent1_d){
+		// cleavage
+		if (runif(1) < drive_cut_rate){
+			// cut becomes a resistance allele
+			if (runif(1) < resistance_rate){
+				child.haploidGenome1.addNewDrawnMutation(m3, 0);}  // new m3 mutation
+			else {
+				// HDR to introduce the drive allele
+				child.haploidGenome1.addMutations(DRIVE);}}}
+	
+	// child genome 2 wt and heterozygote parent 2
+	if (child2_wt & parent2_wt & parent2_d){
+		// cleavage
+		if (runif(1) < drive_cut_rate){
+			// cut becomes a resistance allele
+			if (runif(1) < resistance_rate){
+				child.haploidGenome2.addNewDrawnMutation(m3, 0);}  // new m3 mutation
+			else {
+				// HDR to introduce the drive allele
+				child.haploidGenome2.addMutations(DRIVE);}}}
+	
+	if (num_target_loci > 0){
+		// if parent 1 has at least one drive allele, it can disrupt the target loci
+		if (sum(parent1.haplosomes.countOfMutationsOfType(m2)) > 0){
+			// chance of converting some other wt2 alleles in genome 1
+			disrupt_chance = (runif(num_target_loci) < disruption_rate);
+			resist_chance = (runif(num_target_loci) < func_resist_rate);
+			
+			// positions of the wild type 2 alleles
+			wt2_pos = child.haploidGenome1.positionsOfMutationsOfType(m4);
+			wt2_pos = (match(1:num_target_loci, wt2_pos) >= 0);
+			
+			// potential allele conversions positions
+			disrupt_convert = (disrupt_chance & !resist_chance & wt2_pos);
+			resist_convert = (disrupt_chance & resist_chance & wt2_pos);
+			
+			// make the conversions
+			if (sum(disrupt_convert)){
+				child.haploidGenome1.addNewDrawnMutation(m5, (1:num_target_loci)[disrupt_convert]);}
+			if (sum(resist_convert)){
+				child.haploidGenome1.addNewDrawnMutation(m6, (1:num_target_loci)[resist_convert]);}
+		}
+		
+		// if parent 2 has at least one drive allele, it can disrupt the target loci		
+		if (sum(parent2.haplosomes.countOfMutationsOfType(m2)) > 0){
+			// chance of converting some other wt2 alleles in genome 2
+			disrupt_chance = (runif(num_target_loci) < disruption_rate);
+			resist_chance = (runif(num_target_loci) < func_resist_rate);
+			
+			// positions of the wild type 2 alleles
+			wt2_pos = child.haploidGenome2.positionsOfMutationsOfType(m4);
+			wt2_pos = (match(1:num_target_loci, wt2_pos) >= 0);
+			
+			// potential allele conversions positions
+			disrupt_convert = (disrupt_chance & !resist_chance & wt2_pos);
+			resist_convert = (disrupt_chance & resist_chance & wt2_pos);
+			
+			// make the conversions
+			if (sum(disrupt_convert)){
+				child.haploidGenome2.addNewDrawnMutation(m5, (1:num_target_loci)[disrupt_convert]);}
+			if (sum(resist_convert)){
+				child.haploidGenome2.addNewDrawnMutation(m6, (1:num_target_loci)[resist_convert]);}
+		}
+	}
+	return T;
+}
+
+100:10000 late(){
+	// calculate frequencies of each mutation type
+	wild = sum(p1.individuals.countOfMutationsOfType(m1))/(2*population_size);
+	drive = sum(p1.individuals.countOfMutationsOfType(m2))/(2*population_size);
+	resist = sum(p1.individuals.countOfMutationsOfType(m3))/(2*population_size);
+	
+	// contribute to output file
+	if (make_csv)
+		defineGlobal("new_line", paste(c(new_line, wild, drive, resist), sep=", "));
+	
+	// same thing for mutations at other loci
+	wild2 = 0.0;
+	broken = 0.0;
+	func = 0.0;
+	if (num_target_loci > 0){
+		wild2 = sum(p1.individuals.haplosomes.countOfMutationsOfType(m4))/(2*population_size*num_target_loci);
+		broken = sum(p1.individuals.haplosomes.countOfMutationsOfType(m5))/(2*population_size*num_target_loci);
+		func = sum(p1.individuals.haplosomes.countOfMutationsOfType(m6))/(2*population_size*num_target_loci);
+		
+		// contribute to output file
+		if (make_csv)
+			defineGlobal("new_line", paste(c(new_line, wild2, broken, func), sep=", "));
+	}
+	
+	gen = sim.cycle - 100;
+	catn(paste("GEN::", gen,"MEAN_FITNESS:", fitness,"DRIVE_RATE:", drive, "WT_AT_DRIVE_RATE:",wild, "R1_AT_DRIVE_RATE:", resist,"DISRUPTED_RATE:", broken, "WT_AT_DISRUPTED_RATE:",wild2,"R1_AT_DISRUPTED_RATE:", func));
+	
+	// contribute to output file
+	if (make_csv)
+		defineGlobal("output", output + new_line + "\n");
+	
+	// end the simluation when the drive is fixed or lost (and broken alleles fixed/lost)
+	if (drive == 0){
+		if (num_target_loci == 0){
+			catn(paste("DRIVE_LOST_AT_GEN:", gen));
+			ind = whichMin(fitness_track);
+			min_fitness = fitness_track[ind];
+			catn(paste("ENDING_FITNESS:", fitness));
+			
+			catn(paste0("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+			sim.simulationFinished();
+		} else {
+			// multilocus
+			if (broken == 0){
+				catn(paste("DRIVE_LOST_AND_DISRUPTED_LOST_AT_GEN:", gen));
+				ind = whichMin(fitness_track);
+				min_fitness = fitness_track[ind];
+				catn(paste("ENDING_FITNESS:", fitness));
+				
+				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+				sim.simulationFinished();
+			} else if (broken == 1){
+				catn(paste("DRIVE_LOST_AND_DISRUPTED_FIXED_AT_GEN:", gen));
+				ind = whichMin(fitness_track);
+				min_fitness = fitness_track[ind];
+				catn(paste("ENDING_FITNESS:", fitness));
+				
+				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+				sim.simulationFinished();
+			}
+		}
+	}
+	
+	if (drive == 1){
+		if (num_target_loci == 0){
+			catn(paste("DRIVE_FIXED_AT_GEN:", gen));
+			sim.simulationFinished();
+		} else {
+			if (broken == 1){
+				catn(paste("DRIVE_FIXED_AND_DISRUPTED_FIXED_AT_GEN:", gen));
+				ind = whichMin(fitness_track);
+				min_fitness = fitness_track[ind];
+				catn(paste("ENDING_FITNESS:", fitness));
+				
+				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+				sim.simulationFinished();
+			} else if (broken==0){
+				catn(paste("DRIVE_FIXED_AND_DISRUPTED_LOST_AT_GEN:", gen));
+				ind = whichMin(fitness_track);
+				min_fitness = fitness_track[ind];
+				catn(paste("ENDING_FITNESS:", fitness));
+				
+				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+				sim.simulationFinished();
+			}
+		}
+	}
+}
+
+100:1000 fitnessEffect(){
+	// first make a fitness placeholder with no effect
+	ind_fitness = 1.0;
+	
+	// count homozygous and heterozygous broken alleles
+	if (num_target_loci > 0){
+		positions1 = individual.haploidGenome1.positionsOfMutationsOfType(m5);
+		positions2 = individual.haploidGenome2.positionsOfMutationsOfType(m5);
+		homozygous = size(setIntersection(positions1, positions2));
+		heterozygous = size(positions1) + size(positions2) - (2*homozygous);
+		
+		// create some fitness cost for homozygous deleterious mutations
+		if (homozygous){
+			fitness_costs = rnorm(homozygous, (1.0 + broken_coeff), sd_broken_coeff);
+			fitness_costs[fitness_costs > 1] = 2 - fitness_costs[fitness_costs > 1];  // do not allow beneficial mutations (reflect)
+			ind_fitness = ind_fitness*product(abs(fitness_costs));  // do not allow negative fitness either
+		}
+		
+		// create some fitness cost for heterozygous deleterious mutations
+		if (heterozygous & broken_dom){
+			fitness_costs = rnorm(heterozygous, broken_coeff, sd_broken_coeff);
+			fitness_costs = (1.0 + (broken_dom*fitness_costs));
+			fitness_costs[fitness_costs > 1] = 2 - fitness_costs[fitness_costs > 1];  // do not allow beneficial mutations (reflect)
+			ind_fitness = ind_fitness*product(abs(fitness_costs));  // do not allow negative fitness either
+		}
+	}
+	return ind_fitness;
+}
+
+1000 late(){
+	// need to end the simulation at some point
+	catn("SIMULATION_TIMED_OUT");
+	
+	ind = whichMin(fitness_track);
+	min_fitness = fitness_track[ind];
+	catn(paste("ENDING_FITNESS:", fitness));
+	catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+	
+	// save the output file
+	if (make_csv){
+		if (!writeFile(file_name, output))
+			stop("Error writing output file.");	
+	}
+	
+	sim.simulationFinished();
+}

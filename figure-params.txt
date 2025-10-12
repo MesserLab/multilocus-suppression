@@ -14,7 +14,10 @@ Figure 3: Mean fitness over time for a homing drive (not dsx), varying the fitne
 -20 replicates per s. Plot trajectories colored by s
 
 Figure 4: Heatmap with fitness cost at each target site & number of target sites varying (Isabel)
+-Number of target loci varies across (1,2...,10)
+-Fitness cost varies across (0.1, 0.2, ..., 10)
+-20 replicates per parameter combo
 -Color depicts lowest population fitness or average time to rebound to  ~0.99 population fitness
--Default drive params: h = 0.5, s = 0.1, cleavage rate = 1, r1 rate = 10^-4?
--Default target params: h = 0, disruption rate per site is based on relationship, r1 rate = ?? maybe 10^-4
--20 replicates per parameter combo 
+-Default drive params: h = 0.5, s = 0.1, cleavage rate = 1, r1 rate = 0.001
+-Default target params: h = 0, disruption rate per site is based on relationship, r1 rate = 0.01
+-Other defaults: release_size = 200
