@@ -259,8 +259,10 @@ function (void) defineCfgParam(string$ name, lifs value) {
 			ind = whichMin(fitness_track);
 			min_fitness = fitness_track[ind];
 			catn(paste("ENDING_FITNESS:", fitness));
-			
 			catn(paste0("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+			
+			// save the output file
+			if (make_csv){if (!writeFile(file_name, output)){stop("Error writing output file.");}}
 			sim.simulationFinished();
 		} else {
 			// multilocus
@@ -269,16 +271,20 @@ function (void) defineCfgParam(string$ name, lifs value) {
 				ind = whichMin(fitness_track);
 				min_fitness = fitness_track[ind];
 				catn(paste("ENDING_FITNESS:", fitness));
-				
 				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+
+				// save the output file
+				if (make_csv){if (!writeFile(file_name, output)){stop("Error writing output file.");}}
 				sim.simulationFinished();
 			} else if (broken == 1){
 				catn(paste("DRIVE_LOST_AND_DISRUPTED_FIXED_AT_GEN:", gen));
 				ind = whichMin(fitness_track);
 				min_fitness = fitness_track[ind];
 				catn(paste("ENDING_FITNESS:", fitness));
-				
 				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+
+				// save the output file
+				if (make_csv){if (!writeFile(file_name, output)){stop("Error writing output file.");}}
 				sim.simulationFinished();
 			}
 		}
@@ -287,6 +293,9 @@ function (void) defineCfgParam(string$ name, lifs value) {
 	if (drive == 1){
 		if (num_target_loci == 0){
 			catn(paste("DRIVE_FIXED_AT_GEN:", gen));
+
+			// save the output file
+			if (make_csv){if (!writeFile(file_name, output)){stop("Error writing output file.");}}
 			sim.simulationFinished();
 		} else {
 			if (broken == 1){
@@ -294,23 +303,27 @@ function (void) defineCfgParam(string$ name, lifs value) {
 				ind = whichMin(fitness_track);
 				min_fitness = fitness_track[ind];
 				catn(paste("ENDING_FITNESS:", fitness));
-				
 				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+
+				// save the output file
+				if (make_csv){if (!writeFile(file_name, output)){stop("Error writing output file.");}}
 				sim.simulationFinished();
 			} else if (broken==0){
 				catn(paste("DRIVE_FIXED_AND_DISRUPTED_LOST_AT_GEN:", gen));
 				ind = whichMin(fitness_track);
 				min_fitness = fitness_track[ind];
 				catn(paste("ENDING_FITNESS:", fitness));
-				
 				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+
+				// save the output file
+				if (make_csv){if (!writeFile(file_name, output)){stop("Error writing output file.");}}
 				sim.simulationFinished();
 			}
 		}
 	}
 }
 
-100:1000 fitnessEffect(){
+100:10000 fitnessEffect(){
 	// first make a fitness placeholder with no effect
 	ind_fitness = 1.0;
 	
@@ -339,7 +352,7 @@ function (void) defineCfgParam(string$ name, lifs value) {
 	return ind_fitness;
 }
 
-1000 late(){
+10000 late(){
 	// need to end the simulation at some point
 	catn("SIMULATION_TIMED_OUT");
 	
@@ -349,10 +362,6 @@ function (void) defineCfgParam(string$ name, lifs value) {
 	catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
 	
 	// save the output file
-	if (make_csv){
-		if (!writeFile(file_name, output))
-			stop("Error writing output file.");	
-	}
-	
+	if (make_csv){if (!writeFile(file_name, output)){stop("Error writing output file.");}}
 	sim.simulationFinished();
 }
