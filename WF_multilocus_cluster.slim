@@ -7,9 +7,9 @@ initialize(){
 	defineCfgParam("population_size", 1e4);
 	defineCfgParam("release_size", 200); // represents a 1% drive allele frequency
 	defineCfgParam("recomb_rate", 0.5);
-	defineCfgParam("shared_cas9", 1); // whether cas9 is shared between the drive site and target sites
-	defineCfgParam("baseline_cleavage_rate", 1.0); // max cleavage rate for no saturation
-	defineCfgParam("saturation_factor", 0.5);
+	defineCfgParam("shared_cas9", 0); // whether cas9 is shared between the drive site and target sites
+	defineCfgParam("baseline_cleavage_rate", 0.8); // max cleavage rate for no saturation
+	defineCfgParam("saturation_factor", 0.0);
 	
 	// constants for drive locus
 	defineCfgParam("resistance_rate", 0.001);  // functional resistance at drive locus
