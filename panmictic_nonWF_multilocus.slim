@@ -1,6 +1,6 @@
 initialize(){
 	
-	//setSeed(7224210805541785464);
+	setSeed(7224210805541785464);
 	
 	// new constants for panmictic model
 	defineCfgParam("DRIVE_TYPE", "MULTILOCUS"); // either DSX, MULTILOCUS, or SINGLE_TARGET	
@@ -323,7 +323,7 @@ modifyChild(){
 		
 		if (drive_rate == 0 & popsize > 0){
 			catn("DRIVE_LOST_AT_GEN:: " + relative_gen);
-			sim.simulationFinished();
+			//sim.simulationFinished();
 		}
 	}
 
