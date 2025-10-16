@@ -13,14 +13,14 @@ initialize(){
 	
 	// constants for drive locus
 	defineCfgParam("resistance_rate", 0.001);  // functional resistance at drive locus
-	defineCfgParam("drive_coeff", -0.1);  // selection coefficient of drive allele
+	defineCfgParam("drive_coeff", 0.1);  // selection coefficient of drive allele
 	defineCfgParam("drive_dom", 0.5);  // dominance of drive allele
 	defineCfgParam("drive_cleavage_rate", 1.0); // drive_cut_rate if shared_cas9 = F
 	
 	// constants for distant target loci
 	defineCfgParam("num_target_loci", 10);  // either linked or unlinked
 	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci	
-	defineCfgParam("broken_coeff", -1.0);  // cost of disrupted allele at a target site
+	defineCfgParam("broken_coeff", 1.0);  // cost of disrupted allele at a target site
 	defineCfgParam("sd_broken_coeff", 0);  // sd of rnorm for fitness cost
 	defineCfgParam("broken_dom", 0);  // dominance of disrupted allele at a target site
 	
@@ -44,7 +44,7 @@ initialize(){
 	// setup mutation types
 	initializeMutationRate(0);  // no outside mutations
 	wt = initializeMutationType("m1", 1, "f", 0);  // wild-type allele
-	d = initializeMutationType("m2", drive_dom, "f", drive_coeff);  // gene drive
+	d = initializeMutationType("m2", drive_dom, "f", -1*drive_coeff);  // gene drive
 	r = initializeMutationType("m3", 1, "f", 0);  // resistance allele
 	wt2 = initializeMutationType("m4", 1, "f", 0);  // wild-type at other loci
 	b = initializeMutationType("m5", 1, "f", 0);  // broken allele
@@ -195,7 +195,7 @@ function (void) defineCfgParam(string$ name, lifs value) {
 		
 		// create some fitness cost for homozygous deleterious mutations
 		if (homozygous){
-			fitness_costs = rnorm(homozygous, (1.0 + broken_coeff), sd_broken_coeff);
+			fitness_costs = rnorm(homozygous, (1.0 - broken_coeff), sd_broken_coeff);
 			fitness_costs[fitness_costs > 1] = 2 - fitness_costs[fitness_costs > 1];  // do not allow beneficial mutations (reflect)
 			ind_fitness = ind_fitness*product(abs(fitness_costs));  // do not allow negative fitness either
 		}
@@ -203,7 +203,7 @@ function (void) defineCfgParam(string$ name, lifs value) {
 		// create some fitness cost for heterozygous deleterious mutations
 		if (heterozygous & broken_dom){
 			fitness_costs = rnorm(heterozygous, broken_coeff, sd_broken_coeff);
-			fitness_costs = (1.0 + (broken_dom*fitness_costs));
+			fitness_costs = (1.0 - (broken_dom*fitness_costs));
 			fitness_costs[fitness_costs > 1] = 2 - fitness_costs[fitness_costs > 1];  // do not allow beneficial mutations (reflect)
 			ind_fitness = ind_fitness*product(abs(fitness_costs));  // do not allow negative fitness either
 		}
