@@ -13,7 +13,7 @@
       * Plot the mean trajectory and report the fraction of replicates with suppression (for the lowest r1 rate)
   + Right plot: corresponding allele frequencies
 
-* Second row: homing drive (h = 0.5, cleavage rate = 1, r1 rate = ?, 20 replicates) varying s
+* Second row: homing drive (h = 0.5, cleavage rate = 1, r1 rate = 0.001, 20 replicates) varying s
   + Left plot: mean fitness over time
   + Right plot: corresponding allele frequencies
   
@@ -30,8 +30,8 @@
       * s = 0.1
       * r1 rate = 0.001
   + Target sites:
-      * num target sites = ? (maybe 5)
-      * fitness cost at sites = ? (maybe 0.25)
+      * num target sites = 5
+      * fitness cost at sites = 0.2
       * recessive (h = 0)
       * baseline cleavage rate = 1
       * saturation factor = 0.5
@@ -83,13 +83,13 @@
       * s = 0.1
       * r1 rate = 0.001
   + Target sites:
-      * num target sites is set at ? (maybe 5 or 10)
-      * fitness cost at each site is set at ?
+      * num target sites is set at 10
+      * fitness cost at each site is set at 0.2
       * recessive (h = 0)
       * baseline cleavage rate = 1
       * saturation factor = 0.5
       * r1 rate = 0.01
-      * recombination rate varies in 0.5, 0.001, 0.00001, 0.0000001 ?
+      * recombination rate varies in 0.5, 1e-3, 1e-5, 1e-7, 0
 
 * Plot shows the mean fitness over time at different recombination rates
   + Zoom in on a plateaued line at the end:
