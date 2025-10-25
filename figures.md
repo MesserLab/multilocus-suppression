@@ -42,7 +42,7 @@
 
 * Takeaway from this figure: decoupling the drive and the target can lead to a high genetic load (minimum fitness) and longer time until population rebound (back to fitness 1)
 
-### Figure 4: Exploring different number of target sites and fitness cost at each site (Isabel)
+### Figure 4: Exploring different number of target sites and cumulative fitness costs (Isabel)
 
 * Parameters:
   + No Cas9 sharing between drive and targets
@@ -54,23 +54,24 @@
       * r1 rate = 0.001
   + Target sites:
       * num target sites varies in 1,2,...,10
-      * fitness cost at sites varies in 0.1, 0.2, ..., 1.0
+      * fitness cost at sites varies such that (1-s)^n is some constant
       * recessive (h = 0)
       * baseline cleavage rate = 1
       * saturation factor = 0.5
       * r1 rate = 0.01
       * recombination rate = 0.5
+      * Constant (1-s)^n = 0.01, 0.1, 0.25, 0.5
 
-* 2 heatmaps:
-  1. Color shows minimum population fitness (aka max genetic load) 
-  2. Color shows time-to-rebound
-  3. Could combine the above and show the average area *above* the curve (between fitness = 1 and fitness trajectory)
+* Plot:
+  + x-axis = number of target sites
+  + y-axis = time until all broken alleles are lost 
+  + Hold (1-s)^n = constant. For higher n, the time to recovery increases -- it takes longer for all broken alleles to be lost (Cas9 saturation will only slow the time to minimum fitness; can show that in supplemental plot)
+    * Different line types for different cumulative costs. If the cost is higher, the time to recovery will be faster, since r1 alleles have a greater selective advantage.
 
-* Takeaway from this figure:
-  + More target sites and a larger fitness cost at each -> lowest population fitness but fastest time-to-recovery
-  + Best to target a lot of sites with a more moderate cost -> slower suppression but also slower time-to-recovery
 
-* Transition: how can we allow the multilocus system to remain in the population for longer? Vary linkage.
+* In the supplement, can show the same plot for different saturations (drive site also saturated; no saturation)
+
+* Transition: how can we further increase the time to recovery? By increasing the amount of linkage between the target sites.
 
 ### Figure 5: varying the target site recombination rate (Rachel)
 

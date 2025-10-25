@@ -1,7 +1,7 @@
-initialize(){	
+initialize(){
 	// directory for data storage (folder must be created in advance)	
 	defineCfgParam("make_csv", 0);
-	defineCfgParam("path", paste0(getwd(), "/"));
+	defineCfgParam("path", paste0("/Users/isabelkim/Desktop/year5/multilocus-suppression/cluster/local-output/ten-sites", "/"));
 	
 	// general constants
 	defineCfgParam("population_size", 1e4);
@@ -9,18 +9,19 @@ initialize(){
 	defineCfgParam("recomb_rate", 0.5);
 	defineCfgParam("shared_cas9", 0); // whether cas9 is shared between the drive site and target sites
 	defineCfgParam("baseline_cleavage_rate", 1.0); // max cleavage rate for no saturation
-	defineCfgParam("saturation_factor", 0.5);
+	defineCfgParam("saturation_factor", 0.2);
 	
 	// constants for drive locus
 	defineCfgParam("resistance_rate", 0.001);  // functional resistance at drive locus
 	defineCfgParam("drive_coeff", 0.1);  // selection coefficient of drive allele
+	
 	defineCfgParam("drive_dom", 0.5);  // dominance of drive allele
 	defineCfgParam("drive_cleavage_rate", 1.0); // drive_cut_rate if shared_cas9 = F
 	
 	// constants for distant target loci
 	defineCfgParam("num_target_loci", 10);  // either linked or unlinked
-	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci	
-	defineCfgParam("broken_coeff", 0.2);  // cost of disrupted allele at a target site
+	defineCfgParam("func_resist_rate", 0.1);  // functional alleles at target loci	
+	defineCfgParam("broken_coeff", 0.4);  // cost of disrupted allele at a target site
 	defineCfgParam("sd_broken_coeff", 0);  // sd of rnorm for fitness cost
 	defineCfgParam("broken_dom", 0);  // dominance of disrupted allele at a target site
 	
@@ -40,6 +41,7 @@ initialize(){
 	catn("==============================");
 	catn(paste("TARGET_CUT_RATE::", disruption_rate, "DRIVE_CUT_RATE::", drive_cut_rate));
 	catn("==============================");
+	
 	
 	// setup mutation types
 	initializeMutationRate(0);  // no outside mutations
@@ -83,7 +85,7 @@ initialize(){
 		// create a parameters file
 		file_text = "population_size: " + population_size + "\nrelease_size: " + release_size + "\nrecomb_rate: " + recomb_rate + "\nshared_cas9: " + shared_cas9 + "\nbaseline_cleavage_rate: " + baseline_cleavage_rate + "\nsaturation_factor: " + saturation_factor + "\nresistance_rate: " + resistance_rate + "\ndrive_coeff: " + drive_coeff + "\ndrive_dom: " + drive_dom + "\ndrive_cleavage_rate: " + drive_cleavage_rate + "\nnum_target_loci: " + num_target_loci + "\nfunc_resist_rate: " + func_resist_rate + "\nbroken_coeff: " + broken_coeff + "\nsd_broken_coeff: " + sd_broken_coeff + "\nbroken_dom: " + broken_dom + "\nrecovery_val: " + recovery_val + "\ncleavage_rate: " + cleavage_rate + "\ndisruption_rate: " + disruption_rate + "\ndrive_cut_rate: " + drive_cut_rate;
 		if (!writeFile(path + date_time + "_" + seed + "_parameters.txt", file_text)){
-			stop("Error creating parameters file.");}	
+			stop("Error creating parameters file.");}
 	}
 }
 
@@ -94,7 +96,7 @@ function (void) defineCfgParam(string$ name, lifs value) {
 }
 
 
-100:10000 modifyChild(){
+100: modifyChild(){
 	// need to find the heterozygote (wt/d or d/wt) parents
 	parent1_wt = sum(parent1.haplosomes.countOfMutationsOfType(m1)) == 1;
 	parent1_d = sum(parent1.haplosomes.countOfMutationsOfType(m2)) == 1;
@@ -173,7 +175,7 @@ function (void) defineCfgParam(string$ name, lifs value) {
 	return T;
 }
 
-100:10000 fitnessEffect(){
+100: fitnessEffect(){
 	// first make a fitness placeholder with no effect
 	ind_fitness = 1.0;
 	
@@ -224,7 +226,7 @@ function (void) defineCfgParam(string$ name, lifs value) {
 }
 
 
-101:10000 early(){
+101: early(){
 	// contribute to output file
 	if (make_csv){
 		defineGlobal("new_line", paste(c(sim.cycle - 100, mean(p1.cachedFitness(NULL))), sep=", "));}
@@ -233,10 +235,6 @@ function (void) defineCfgParam(string$ name, lifs value) {
 	defineGlobal("fitness", mean(p1.cachedFitness(NULL)));
 	defineGlobal("fitness_track", c(fitness_track, fitness));
 	
-	if (fitness <= 0){
-		catn(paste0("POPULATION_CRASH_WITH_FITNESS: ", fitness));
-		sim.simulationFinished();
-	}
 	
 	if (fitness <= recovery_val & !fitness_below_val){
 		catn("========================================");
@@ -252,8 +250,8 @@ function (void) defineCfgParam(string$ name, lifs value) {
 		catn("========================================");
 		defineGlobal("fitness_rose_above_val", T);
 	}
-
-
+	
+	
 	// calculate frequencies of each mutation type
 	wild = sum(p1.individuals.countOfMutationsOfType(m1))/(2*population_size);
 	drive = sum(p1.individuals.countOfMutationsOfType(m2))/(2*population_size);
@@ -284,69 +282,60 @@ function (void) defineCfgParam(string$ name, lifs value) {
 	if (make_csv){
 		if (!writeFile(file_name, new_line, append = T)){stop("Error appending to output file.");}}
 	
-	// end the simluation when the drive is fixed or lost (and broken alleles fixed/lost)
+	
+	// drive loss
 	if (drive == 0){
+		catn(paste("DRIVE_LOST_AT_GEN:", gen));
+		
 		if (num_target_loci == 0){
-			catn(paste("DRIVE_LOST_AT_GEN:", gen));
 			ind = whichMin(fitness_track);
 			min_fitness = fitness_track[ind];
 			catn(paste("ENDING_FITNESS:", fitness));
 			catn(paste0("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
-				
 			sim.simulationFinished();
-		} else {
-			// multilocus
-			if (broken == 0){
-				catn(paste("DRIVE_LOST_AND_DISRUPTED_LOST_AT_GEN:", gen));
-				ind = whichMin(fitness_track);
-				min_fitness = fitness_track[ind];
-				catn(paste("ENDING_FITNESS:", fitness));
-				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
-				
-				sim.simulationFinished();
-			} else if (broken == 1){
-				catn(paste("DRIVE_LOST_AND_DISRUPTED_FIXED_AT_GEN:", gen));
-				ind = whichMin(fitness_track);
-				min_fitness = fitness_track[ind];
-				catn(paste("ENDING_FITNESS:", fitness));
-				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
-					
-				sim.simulationFinished();
-			}
 		}
 	}
 	
+	// drive fixation
 	if (drive == 1){
+		catn(paste("DRIVE_FIXED_AT_GEN:", gen));
+		
 		if (num_target_loci == 0){
-			catn(paste("DRIVE_FIXED_AT_GEN:", gen));
-			
+			ind = whichMin(fitness_track);
+			min_fitness = fitness_track[ind];
+			catn(paste("ENDING_FITNESS:", fitness));
+			catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
 			sim.simulationFinished();
-		} else {
-			if (broken == 1){
-				catn(paste("DRIVE_FIXED_AND_DISRUPTED_FIXED_AT_GEN:", gen));
-				ind = whichMin(fitness_track);
-				min_fitness = fitness_track[ind];
-				catn(paste("ENDING_FITNESS:", fitness));
-				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
-				
-				sim.simulationFinished();
-			} else if (broken==0){
-				catn(paste("DRIVE_FIXED_AND_DISRUPTED_LOST_AT_GEN:", gen));
-				ind = whichMin(fitness_track);
-				min_fitness = fitness_track[ind];
-				catn(paste("ENDING_FITNESS:", fitness));
-				catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
-					
-				sim.simulationFinished();
-			}
 		}
 	}
+	
+	if (num_target_loci == 0)
+		return;
+	
+	// disrupted site fixation
+	if (broken == 0){
+		catn(paste("DISRUPTED_LOST_AT_GEN:",gen));
+	} else if (broken == 1){
+		catn(paste("DISRUPTED_FIXED_AT_GEN:",gen));
+	}
+	
+
+	if ((broken == 0 | broken == 1) & (drive == 1 | drive == 0)){
+		catn(paste("BOTH_FIXED_OR_LOST_AT_GEN::", gen, "broken_rate:", broken, "drive_rate:", drive));
+		ind = whichMin(fitness_track);
+		min_fitness = fitness_track[ind];
+		catn(paste("ENDING_FITNESS:", fitness));
+		catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+		sim.simulationFinished();
+	}
+
+
 }
 
 
 
 10000 early(){
-
+	
 	// need to end the simulation at some point
 	catn("SIMULATION_TIMED_OUT");
 	
