@@ -1,7 +1,8 @@
 initialize(){
 	// directory for data storage (folder must be created in advance)	
-	defineCfgParam("make_csv", 0);
-	defineCfgParam("path", paste0("/Users/isabelkim/Desktop/year5/multilocus-suppression/cluster/local-output/ten-sites", "/"));
+	defineCfgParam("make_csv", 1);
+	
+	defineCfgParam("path", paste0(getwd(), "/"));
 	
 	// general constants
 	defineCfgParam("population_size", 1e4);
@@ -9,7 +10,7 @@ initialize(){
 	defineCfgParam("recomb_rate", 0.5);
 	defineCfgParam("shared_cas9", 0); // whether cas9 is shared between the drive site and target sites
 	defineCfgParam("baseline_cleavage_rate", 1.0); // max cleavage rate for no saturation
-	defineCfgParam("saturation_factor", 0.2);
+	defineCfgParam("saturation_factor", 0.5);
 	
 	// constants for drive locus
 	defineCfgParam("resistance_rate", 0.001);  // functional resistance at drive locus
@@ -19,9 +20,9 @@ initialize(){
 	defineCfgParam("drive_cleavage_rate", 1.0); // drive_cut_rate if shared_cas9 = F
 	
 	// constants for distant target loci
-	defineCfgParam("num_target_loci", 10);  // either linked or unlinked
-	defineCfgParam("func_resist_rate", 0.1);  // functional alleles at target loci	
-	defineCfgParam("broken_coeff", 0.4);  // cost of disrupted allele at a target site
+	defineCfgParam("num_target_loci", 1);  // either linked or unlinked
+	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci	
+	defineCfgParam("broken_coeff", 0.9444444);  // cost of disrupted allele at a target site
 	defineCfgParam("sd_broken_coeff", 0);  // sd of rnorm for fitness cost
 	defineCfgParam("broken_dom", 0);  // dominance of disrupted allele at a target site
 	
@@ -313,7 +314,7 @@ function (void) defineCfgParam(string$ name, lifs value) {
 		return;
 	
 	// disrupted site fixation
-	if (broken == 0){
+	if (broken == 0 & gen > 1){
 		catn(paste("DISRUPTED_LOST_AT_GEN:",gen));
 	} else if (broken == 1){
 		catn(paste("DISRUPTED_FIXED_AT_GEN:",gen));
