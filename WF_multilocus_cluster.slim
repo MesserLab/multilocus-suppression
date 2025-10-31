@@ -1,4 +1,8 @@
 initialize(){
+	
+	//setSeed(9056365555388563187);
+	defineConstant("PLOT_HOMZ_COUNTS", F);
+	
 	// directory for data storage (folder must be created in advance)	
 	defineCfgParam("make_csv", 1);
 	
@@ -7,42 +11,45 @@ initialize(){
 	// general constants
 	defineCfgParam("population_size", 1e4);
 	defineCfgParam("release_size", 200); // represents a 1% drive allele frequency
-	defineCfgParam("recomb_rate", 0.5);
+	defineCfgParam("recomb_rate", 0.5); // 0.5 default
 	defineCfgParam("shared_cas9", 0); // whether cas9 is shared between the drive site and target sites
-	defineCfgParam("baseline_cleavage_rate", 1.0); // max cleavage rate for no saturation
-	defineCfgParam("saturation_factor", 0.5);
+	defineCfgParam("baseline_cleavage_rate", 0.8); // max cleavage rate for no saturation
+	defineCfgParam("saturation_factor", 0.0);
 	
 	// constants for drive locus
-	defineCfgParam("resistance_rate", 0.001);  // functional resistance at drive locus
-	defineCfgParam("drive_coeff", 0.1);  // selection coefficient of drive allele
+	defineCfgParam("resistance_rate", 0.00001);  // functional resistance at drive locus
+	defineCfgParam("drive_coeff", 1.0);  // selection coefficient of drive allele
 	
-	defineCfgParam("drive_dom", 0.5);  // dominance of drive allele
+	defineCfgParam("drive_dom", 0.0);  // dominance of drive allele
 	defineCfgParam("drive_cleavage_rate", 1.0); // drive_cut_rate if shared_cas9 = F
 	
 	// constants for distant target loci
-	defineCfgParam("num_target_loci", 1);  // either linked or unlinked
+	defineCfgParam("num_target_loci", 0);  // either linked or unlinked
 	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci	
-	defineCfgParam("broken_coeff", 0.9444444);  // cost of disrupted allele at a target site
+	defineCfgParam("broken_coeff", 0.2510156);  // cost of disrupted allele at a target site
 	defineCfgParam("sd_broken_coeff", 0);  // sd of rnorm for fitness cost
 	defineCfgParam("broken_dom", 0);  // dominance of disrupted allele at a target site
 	
 	// constants for tracking output
-	defineCfgParam("recovery_val", 0.99); // when fitness reaches this or above, population is "recovered"
+	defineCfgParam("end_simulation_at_genetic_load_cutoff", 0);
+	defineCfgParam("recovery_val", 0.2); // when GL < 0.2, end simulation
 	
 	// constants based on other defined constants
 	defineConstant("cleavage_rate", ifelse(shared_cas9==1, baseline_cleavage_rate/((num_target_loci + 1)^(saturation_factor)), baseline_cleavage_rate/((num_target_loci)^(saturation_factor))));
 	defineConstant("disruption_rate", cleavage_rate);  // creating non-functional alleles at target loci
 	defineConstant("drive_cut_rate", ifelse(shared_cas9==1, cleavage_rate, drive_cleavage_rate)); // cutting the wild-type allele at drive locus
 	
-	defineGlobal("fitness_below_val", F);
-	defineGlobal("fitness_rose_above_val", F);
+	// genetic load must increase above 0.2 and then eventually fall below
+	defineGlobal("genetic_load_below_val", F);
+	defineGlobal("genetic_load_rose_above_val", F);
 	defineGlobal("time_to_recovery", -1);
-	defineGlobal("fitness_track", c());
+	defineGlobal("genetic_load_track", c());
 	
 	catn("==============================");
 	catn(paste("TARGET_CUT_RATE::", disruption_rate, "DRIVE_CUT_RATE::", drive_cut_rate));
 	catn("==============================");
 	
+	catn(paste("SEED_NUMBER::", getSeed()));
 	
 	// setup mutation types
 	initializeMutationRate(0);  // no outside mutations
@@ -69,9 +76,22 @@ initialize(){
 	
 	// setup the output file
 	if (make_csv){
-		if (num_target_loci > 0){file = "gen_num, mean_fit, wt_rate, drive_rate, resist_rate, " +
-				"wt2_rate, broken_rate, func_rate";}
-		else {file = "gen_num, mean_fit, wt_rate, drive_rate, resist_rate";}
+		if (num_target_loci > 0){
+			file = "gen_num, mean_fit, genetic_load, wt_rate, drive_rate, resist_rate, wt2_rate, broken_rate, func_rate";
+			
+			// Also record the count of individuals with 0 homz disrupted, 1 homz disrupted,..., all homz disrupted sites
+			possible_homz_sites = 0:num_target_loci;
+			headers = c();
+			for (count in possible_homz_sites){
+				col = paste0("frac_inds_with_", count,"_homz_disrupted");
+				headers = c(headers, col);
+			}
+			
+			file = file + "," + paste(headers, sep = ", ") + "," + "mean_num_disrupted_on_haplotype";
+		
+		} else {
+			file = "gen_num, mean_fit, genetic_load, wt_rate, drive_rate, resist_rate";
+		}
 		defineGlobal("output", file);
 		
 		//determine the file name
@@ -229,27 +249,31 @@ function (void) defineCfgParam(string$ name, lifs value) {
 
 101: early(){
 	// contribute to output file
-	if (make_csv){
-		defineGlobal("new_line", paste(c(sim.cycle - 100, mean(p1.cachedFitness(NULL))), sep=", "));}
 	
 	// store the fitness value
 	defineGlobal("fitness", mean(p1.cachedFitness(NULL)));
-	defineGlobal("fitness_track", c(fitness_track, fitness));
-	
-	
-	if (fitness <= recovery_val & !fitness_below_val){
-		catn("========================================");
-		catn(paste("fitness_below_val_AT_GEN:", sim.cycle - 100));
-		catn("========================================");
-		defineGlobal("fitness_below_val", T);
+	defineGlobal("genetic_load", 1 - fitness);
+	if (make_csv){
+		defineGlobal("new_line", paste(c(sim.cycle - 100, fitness, genetic_load), sep=", "));
 	}
 	
-	if (fitness >= recovery_val & fitness_below_val & !fitness_rose_above_val){
+	
+	defineGlobal("genetic_load_track", c(genetic_load_track, genetic_load));
+	
+	
+	if (genetic_load >= recovery_val & !genetic_load_rose_above_val){
+		catn("========================================");
+		catn(paste("genetic_load_above_val_AT_GEN:", sim.cycle - 100));
+		catn("========================================");
+		defineGlobal("genetic_load_rose_above_val", T);
+	}
+	
+	if (genetic_load < recovery_val & genetic_load_rose_above_val & !genetic_load_below_val){
 		defineGlobal("time_to_recovery", sim.cycle - 100);
 		catn("========================================");
-		catn(paste("FITNESS_RECOVERED_AT_GEN:", time_to_recovery));
+		catn(paste("GENETIC_LOAD_BELOW_VAL_AT_GEN:", time_to_recovery));
 		catn("========================================");
-		defineGlobal("fitness_rose_above_val", T);
+		defineGlobal("genetic_load_below_val", T);
 	}
 	
 	
@@ -266,18 +290,74 @@ function (void) defineCfgParam(string$ name, lifs value) {
 	wild2 = 0.0;
 	broken = 0.0;
 	func = 0.0;
+	all = p1.individuals;
+	
 	if (num_target_loci > 0){
 		wild2 = sum(p1.individuals.haplosomes.countOfMutationsOfType(m4))/(2*population_size*num_target_loci);
 		broken = sum(p1.individuals.haplosomes.countOfMutationsOfType(m5))/(2*population_size*num_target_loci);
 		func = sum(p1.individuals.haplosomes.countOfMutationsOfType(m6))/(2*population_size*num_target_loci);
 		
+		possible = num_target_loci + 1;
+		m_counts = matrix(rep(0.0, 3*possible), nrow = 3, ncol = possible);
+		m_counts[0,] = 0:num_target_loci;
+		
 		// contribute to output file
 		if (make_csv){
-			defineGlobal("new_line", paste(c(new_line, wild2, broken, func), sep=", "));}
+			defineGlobal("new_line", paste(c(new_line, wild2, broken, func), sep=", "));
+		}
+		
+		// count the average number of homzygous target alleles
+		homz_target_count = c();
+		num_disrupted_on_haplotype = c();
+		
+		for (ind in all){
+			positions1 = ind.haploidGenome1.positionsOfMutationsOfType(m5);
+			positions2 = ind.haploidGenome2.positionsOfMutationsOfType(m5);
+			homozygous = size(setIntersection(positions1, positions2));
+			homz_target_count = c(homz_target_count, homozygous);
+			
+			num_disrupted_genome1 = size(positions1);
+			num_disrupted_genome2 = size(positions2);
+			num_disrupted_on_haplotype = c(num_disrupted_on_haplotype, num_disrupted_genome1, num_disrupted_genome2);
+		}
+		
+		mean_num_disrupted_on_haplotype = mean(num_disrupted_on_haplotype);
+		avg_homz_target_count = mean(homz_target_count);
+		uniqueVals = unique(homz_target_count);
+		possible_n = 0:num_target_loci;
+		counts_of_each_n = sapply(possible_n, "sum(homz_target_count == applyValue);");
+		m_counts[1,] = counts_of_each_n;
+		n = sum(counts_of_each_n);
+		if (n > 0)
+			m_counts[2,] = m_counts[1,]/n;
+		
+		
+		if (make_csv){
+			defineGlobal("new_line", paste(c(new_line, m_counts[2,], mean_num_disrupted_on_haplotype), sep=", "));
+		}
+	
+	} else {
+		avg_n_drive_carriers = 0;
+		avg_n_nondrive_carriers = 0;
+		avg_homz_target_count = 0;
+		mean_num_disrupted_on_haplotype = 0;
 	}
 	
+	
+	
 	gen = sim.cycle - 100;
-	catn(paste("GEN::", gen,"MEAN_FITNESS:", fitness,"DRIVE_RATE:", drive, "WT_AT_DRIVE_RATE:",wild, "R1_AT_DRIVE_RATE:", resist,"DISRUPTED_RATE:", broken, "WT_AT_DISRUPTED_RATE:",wild2,"R1_AT_DISRUPTED_RATE:", func));
+	
+	catn(paste("GEN::", gen,"MEAN_FITNESS:", fitness,"DRIVE_RATE:", drive, "WT_AT_DRIVE_RATE:",wild, "R1_AT_DRIVE_RATE:", resist,"DISRUPTED_RATE:", broken, "WT_AT_DISRUPTED_RATE:",wild2,"R1_AT_DISRUPTED_RATE:", func,"GENETIC_LOAD:", genetic_load, "AVG_HOMZ_TARGET_COUNT:", avg_homz_target_count, "AVG_NUM_DISRUPTED_ON_HAPLOSOME:", mean_num_disrupted_on_haplotype));
+	
+	if (num_target_loci > 0){
+		catn("NUM_HOMZ_SITES_AND_COUNT::");
+		print(m_counts);
+		
+		if (PLOT_HOMZ_COUNTS){
+			plot = slimgui.createPlot(paste0("gen: ", gen,"\ngenetic load = ", 1 - fitness), xrange = c(0, possible), yrange = c(0, p1.individualCount), xlab = "Number of homozygous targets", ylab = "Count of individuals");
+			plot.points(m_counts[0,], m_counts[1,], 16, size = 2.0);
+		}
+	}
 	
 	// append to output file
 	if (make_csv){
@@ -289,10 +369,10 @@ function (void) defineCfgParam(string$ name, lifs value) {
 		catn(paste("DRIVE_LOST_AT_GEN:", gen));
 		
 		if (num_target_loci == 0){
-			ind = whichMin(fitness_track);
-			min_fitness = fitness_track[ind];
-			catn(paste("ENDING_FITNESS:", fitness));
-			catn(paste0("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+			ind = whichMax(genetic_load_track);
+			max_genetic_load = genetic_load_track[ind];
+			catn(paste("ENDING_GENETIC_LOAD:", genetic_load));
+			catn(paste("MAXIMUM_GENETIC_LOAD:", max_genetic_load, "AT_GEN:", ind));
 			sim.simulationFinished();
 		}
 	}
@@ -302,12 +382,20 @@ function (void) defineCfgParam(string$ name, lifs value) {
 		catn(paste("DRIVE_FIXED_AT_GEN:", gen));
 		
 		if (num_target_loci == 0){
-			ind = whichMin(fitness_track);
-			min_fitness = fitness_track[ind];
-			catn(paste("ENDING_FITNESS:", fitness));
-			catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+			ind = whichMax(genetic_load_track);
+			max_genetic_load = genetic_load_track[ind];
+			catn(paste("ENDING_GENETIC_LOAD:", genetic_load));
+			catn(paste("MAXIMUM_GENETIC_LOAD:", max_genetic_load, "AT_GEN:", ind));
 			sim.simulationFinished();
 		}
+	}
+	
+	if (end_simulation_at_genetic_load_cutoff & genetic_load_below_val){
+		ind = whichMax(genetic_load_track);
+		max_genetic_load = genetic_load_track[ind];
+		catn(paste("ENDING_GENETIC_LOAD:", genetic_load));
+		catn(paste("MAXIMUM_GENETIC_LOAD:", max_genetic_load, "AT_GEN:", ind));
+		sim.simulationFinished();
 	}
 	
 	if (num_target_loci == 0)
@@ -320,13 +408,13 @@ function (void) defineCfgParam(string$ name, lifs value) {
 		catn(paste("DISRUPTED_FIXED_AT_GEN:",gen));
 	}
 	
-
+	
 	if ((broken == 0 | broken == 1) & (drive == 1 | drive == 0)){
 		catn(paste("BOTH_FIXED_OR_LOST_AT_GEN::", gen, "broken_rate:", broken, "drive_rate:", drive));
-		ind = whichMin(fitness_track);
-		min_fitness = fitness_track[ind];
-		catn(paste("ENDING_FITNESS:", fitness));
-		catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+		ind = whichMax(genetic_load_track);
+		max_genetic_load = genetic_load_track[ind];
+		catn(paste("ENDING_GENETIC_LOAD:", genetic_load));
+		catn(paste("MAXIMUM_GENETIC_LOAD:", max_genetic_load, "AT_GEN:", ind));
 		sim.simulationFinished();
 	}
 
@@ -335,15 +423,15 @@ function (void) defineCfgParam(string$ name, lifs value) {
 
 
 
-10000 early(){
+10100 early(){
 	
-	// need to end the simulation at some point
+	// end 10,000 generations after the drive was released if not already stopped
 	catn("SIMULATION_TIMED_OUT");
 	
-	ind = whichMin(fitness_track);
-	min_fitness = fitness_track[ind];
-	catn(paste("ENDING_FITNESS:", fitness));
-	catn(paste("MINIMUM_FITNESS:", min_fitness, "AT_GEN:", ind));
+	ind = whichMax(genetic_load_track);
+	max_genetic_load = genetic_load_track[ind];
+	catn(paste("ENDING_GENETIC_LOAD:", genetic_load));
+	catn(paste("MAXIMUM_GENETIC_LOAD:", max_genetic_load, "AT_GEN:", ind));
 	
 	sim.simulationFinished();
 }
