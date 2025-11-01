@@ -4,7 +4,7 @@ initialize(){
 	defineConstant("PLOT_HOMZ_COUNTS", F);
 	
 	// directory for data storage (folder must be created in advance)	
-	defineCfgParam("make_csv", 1);
+	defineCfgParam("make_csv", 0);
 	
 	defineCfgParam("path", paste0(getwd(), "/"));
 	
@@ -17,14 +17,14 @@ initialize(){
 	defineCfgParam("saturation_factor", 0.0);
 	
 	// constants for drive locus
-	defineCfgParam("resistance_rate", 0.00001);  // functional resistance at drive locus
-	defineCfgParam("drive_coeff", 1.0);  // selection coefficient of drive allele
+	defineCfgParam("resistance_rate", 0.001);  // functional resistance at drive locus
+	defineCfgParam("drive_coeff", 0.1);  // selection coefficient of drive allele
 	
-	defineCfgParam("drive_dom", 0.0);  // dominance of drive allele
+	defineCfgParam("drive_dom", 0.5);  // dominance of drive allele
 	defineCfgParam("drive_cleavage_rate", 1.0); // drive_cut_rate if shared_cas9 = F
 	
 	// constants for distant target loci
-	defineCfgParam("num_target_loci", 0);  // either linked or unlinked
+	defineCfgParam("num_target_loci", 10);  // either linked or unlinked
 	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci	
 	defineCfgParam("broken_coeff", 0.2510156);  // cost of disrupted allele at a target site
 	defineCfgParam("sd_broken_coeff", 0);  // sd of rnorm for fitness cost
