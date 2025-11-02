@@ -1,16 +1,20 @@
 initialize(){
+
+	setSeed(5898902782196442742);
 	
-	defineConstant("PLOT_HOMZ_COUNTS", F);
+	defineConstant("PLOT_HOMZ_COUNTS", F); // liveplots the count of homz disrupted sites each generation
+	defineConstant("PRINT_COMMON_HAPLOTYPES", F); // prints the most common haplotypes every generation (SLOW, better to call reportHaplotypeCounts() from the Eidos console)
+	defineConstant("NUM_HAPLOTYPES_PRINT", 10); // only print the NUM_HAPLOTYPES_PRINT most common haplotypes
 	
 	// directory for data storage (folder must be created in advance)	
-	defineCfgParam("make_csv", 1);
+	defineCfgParam("make_csv", 0);
 	
 	defineCfgParam("path", paste0(getwd(), "/"));
 	
 	// general constants
 	defineCfgParam("population_size", 1e4);
 	defineCfgParam("release_size", 200); // represents a 1% drive allele frequency
-	defineCfgParam("recomb_rate", 0.5); // 0.5 default
+	defineCfgParam("recomb_rate", 1e-7); // 0.5 default
 	defineCfgParam("shared_cas9", 0); // whether cas9 is shared between the drive site and target sites
 	defineCfgParam("baseline_cleavage_rate", 0.8); // max cleavage rate for no saturation
 	defineCfgParam("saturation_factor", 0.0);
@@ -23,9 +27,9 @@ initialize(){
 	defineCfgParam("drive_cleavage_rate", 1.0); // drive_cut_rate if shared_cas9 = F
 	
 	// constants for distant target loci
-	defineCfgParam("num_target_loci", 5);  // either linked or unlinked
+	defineCfgParam("num_target_loci", 4);  // either linked or unlinked
 	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci	
-	defineCfgParam("broken_coeff", 0.4390224);  // cost of disrupted allele at a target site
+	defineCfgParam("broken_coeff", 0.514508228292677);  // cost of disrupted allele at a target site
 	defineCfgParam("sd_broken_coeff", 0);  // sd of rnorm for fitness cost
 	defineCfgParam("broken_dom", 0);  // dominance of disrupted allele at a target site
 	
@@ -114,6 +118,72 @@ function (void) defineCfgParam(string$ name, lifs value) {
 	
 	if (!exists(name))
 		defineConstant(name, value);
+}
+
+function (string)haplotypeString(o<Haplosome>$ genome){
+	// Converts an individual's haplotype at the disrupted sites to a string
+	// b = disrupted
+	// w = wild-type (undisrupted)
+	// r = resistant
+	
+	pos_disrupted = genome.positionsOfMutationsOfType(m5);
+	pos_wildtype = genome.positionsOfMutationsOfType(m4);
+	pos_r1 = genome.positionsOfMutationsOfType(m6);
+	parallel_disrupted = rep("b", size(pos_disrupted));
+	parallel_wildtype = rep("w", size(pos_wildtype));
+	parallel_r1 = rep("r", size(pos_r1));
+	
+	combined_dis_wt_r1 = c(pos_disrupted, pos_wildtype, pos_r1);
+	parallel_dis_wt_r1 = c(parallel_disrupted, parallel_wildtype, parallel_r1);
+
+	ordering = order(combined_dis_wt_r1);
+
+	haplotype_order = parallel_dis_wt_r1[ordering];
+
+	haplotype = paste0(haplotype_order);
+	
+	return haplotype;
+}
+
+
+function (void)reportHaplotypeCounts([integer max_num_report = -1]){
+	// Lists the max_num_report most common haplotypes and their counts
+	// if max_num_report is -1, reports ALL of them
+	// b = disrupted
+	// w = wild-type (undisrupted)
+	// r = resistant
+
+	all = p1.individuals;
+	haplos = c();
+	
+	for (ind in all){
+		haplo_str1 = haplotypeString(ind.haploidGenome1);
+		haplo_str2 = haplotypeString(ind.haploidGenome2);
+		
+		haplos = c(haplos, haplo_str1, haplo_str2);
+	}
+	
+	unique_haplotypes = unique(haplos);
+	num_unique_haplotypes = size(unique_haplotypes);
+	haplotype_counts = sapply(unique_haplotypes, "sum(haplos == applyValue);");
+	
+	ordering = order(haplotype_counts, ascending = F); // greatest to least
+	
+	common_haplotypes = unique_haplotypes[ordering];
+	common_haplotypes_counts = haplotype_counts[ordering];
+	
+	if ((max_num_report != -1) & (num_unique_haplotypes > max_num_report)){
+		common_haplotypes = common_haplotypes[seqLen(max_num_report)];
+		common_haplotypes_counts = common_haplotypes_counts[seqLen(max_num_report)];
+	}
+	
+	catn("======================================");
+	line = "HAPLOTYPES:\tCOUNT\tFREQ::\n";
+	for (i in seqLen(size(common_haplotypes))){
+		line = line + common_haplotypes[i] + ":\t" + asString(common_haplotypes_counts[i]) + "\t" + asString(common_haplotypes_counts[i]/(2*population_size)) + "\n";
+	}
+	cat(line);
+	catn("======================================");
 }
 
 
@@ -351,8 +421,13 @@ function (void) defineCfgParam(string$ name, lifs value) {
 	catn(paste("GEN::", gen,"MEAN_FITNESS:", fitness,"DRIVE_RATE:", drive, "WT_AT_DRIVE_RATE:",wild, "R1_AT_DRIVE_RATE:", resist,"DISRUPTED_RATE:", broken, "WT_AT_DISRUPTED_RATE:",wild2,"R1_AT_DISRUPTED_RATE:", func,"GENETIC_LOAD:", genetic_load, "AVG_HOMZ_TARGET_COUNT:", avg_homz_target_count, "AVG_NUM_DISRUPTED_ON_HAPLOSOME:", mean_num_disrupted_on_haplotype));
 	
 	if (num_target_loci > 0){
+	
 		catn("NUM_HOMZ_SITES_AND_COUNT::");
 		print(m_counts);
+		
+		if (PRINT_COMMON_HAPLOTYPES)
+			reportHaplotypeCounts(NUM_HAPLOTYPES_PRINT);
+		
 		
 		if (PLOT_HOMZ_COUNTS){
 			plot = slimgui.createPlot(paste0("gen: ", gen,"\ngenetic load = ", 1 - fitness), xrange = c(0, possible), yrange = c(0, p1.individualCount), xlab = "Number of homozygous targets", ylab = "Count of individuals");
