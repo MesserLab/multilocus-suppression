@@ -1,0 +1,311 @@
+---
+title: "Creating figures for the paper"
+output: 
+  github_document:
+    toc: true
+    toc_depth: 5
+date: "2025-11-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+This R markdown shows how all figure panels in the paper were made, except for Figure 2, which was created in PowerPoint. Before running this code, be sure to unzip all compressed folders in `data/`
+
+`multilocus-suppression-functions.R` contains all functions used for these plots. See the each function's specs for a detailed breakdown of how it works.
+
+Panels were combined using Adobe Illustrator 2025.
+
+## Single locus plots
+
+* Note: when the mean fitness of the population was reduced to 0 (such that the genetic load imposed by the suppression drive was 1), the WF SLiM simulation crashed because 10,000 offspring could not be produced. For such replicates, we manually ensured that csvs summarizing the replicates had an ending mean fitness of 0 and genetic load of 1.
+
+```{r eval=F}
+rm(list = ls())
+if (!requireNamespace("here", quietly = TRUE)) install.packages("here")
+library(here)
+
+source(here("multilocus-suppression-functions.R"))
+
+# Calculate necessary text size, based on the size of the Adobe Illustrator artboard 
+# and the amount of scaling done in Overleaf
+sizes = calculate_text_size(1080, 1, 11)
+text_size = sizes$text_size
+
+max_gen = 100
+linewidth = 1
+
+# dsx and s_d = 0.2 for resistance rate of 1e-5
+
+# legend.res = plot_single_locus_joint_gl_joint_res(resistance_rate = 1e-5,
+#                                             max_gen = max_gen,
+#                                             legend.pos = "right",
+#                                             text_size = text_size,
+#                                             linewidth = linewidth)
+# ggsave(plot = legend.res$gl, filename = "legend-single-locus.pdf", width = 6, height = 6)
+
+plts.res1e_5 = plot_single_locus_joint_gl_joint_res(resistance_rate = 1e-5,
+                                            max_gen = max_gen,
+                                            legend.pos = "none",
+                                            text_size = text_size,
+                                            linewidth = linewidth)
+
+
+panelA = plts.res1e_5$gl + xlab("") + ggtitle(TeX(r"($r_d = 10^{-5}$)")) + 
+  theme(plot.title = element_text(size = text_size, hjust = 0.5))
+
+panelB = plts.res1e_5$res
+
+# dsx and s_d = 0.2 for resistance rate of 1e-4
+plts.res1e_4 = plot_single_locus_joint_gl_joint_res(resistance_rate = 1e-4,
+                                            max_gen = max_gen,
+                                            legend.pos = "none",
+                                            text_size = text_size,
+                                            linewidth = linewidth)
+
+panelC = plts.res1e_4$gl + xlab("") + ylab("") + ggtitle(TeX(r"($r_d = 10^{-4}$)")) + 
+  theme(plot.title = element_text(size = text_size, hjust = 0.5)) 
+
+panelD = plts.res1e_4$res + ylab("")
+
+# dsx and s_d = 0.2 for resistance rate of 1e-3
+plts.res1e_3 = plot_single_locus_joint_gl_joint_res(resistance_rate = 1e-3,
+                                            max_gen = max_gen,
+                                            legend.pos = "none",
+                                            text_size = text_size,
+                                            linewidth = linewidth)
+panelE = plts.res1e_3$gl + xlab("") + ylab("") + ggtitle(TeX(r"($r_d = 10^{-3}$)")) + 
+  theme(plot.title = element_text(size = text_size, hjust = 0.5)) 
+
+panelF = plts.res1e_3$res + ylab("")
+
+
+# combine panels
+dist.w = -0.18
+dist.h = -0.1
+
+combined = plot_grid(panelA, NULL, panelC, NULL, panelE,
+                     NULL, NULL, NULL, NULL, NULL,
+                     panelB, NULL, panelD, NULL, panelF,
+                     nrow = 3, ncol = 5,
+                     align = "hv",
+                     rel_widths = c(1, dist.w, 1, dist.w, 1),
+                     rel_heights = c(1, dist.h, 1))
+
+# To save, uncomment the line below:
+
+# ggsave(plot = combined,filename = "combined-gl-res-panel.pdf", width = 15, height = 8.75)
+```
+
+## Multilocus plot with unlinked targets
+
+```{r eval=F, message = F}
+rm(list = ls())
+if (!requireNamespace("here", quietly = TRUE)) install.packages("here")
+library(here)
+
+source(here("multilocus-suppression-functions.R"))
+
+# Calculate necessary text size, based on the size of the Adobe Illustrator artboard 
+# and the amount of scaling done in Overleaf
+sizes = calculate_text_size(900, 1, 11)
+text_size = sizes$text_size
+
+# Load in summary of the cluster run varying n and lambda^*
+# lambda^* is indicated by the FGL column ("fixed genetic load")
+combined_data = read_csv(here("data/n-lambda/cas9-drive1-target0.8/n-vs-lambda-drive1-targets0.8-summary.csv"),
+                         col_names = T)
+
+
+# Panels A and B: genetic load and drive and target frequencies 
+max_gen = 100; linewidth = 1
+palette = c("saddlebrown", "green4", "mediumslateblue") # 1 5 10
+
+title = TeX(r"($\lambda^* = 0.95$)")
+
+res.no.legend = plot_multilocus_genetic_load_summaries(text_size = text_size, max_gen = max_gen,
+                                             linewidth = linewidth, title = "", legend.pos = "none")
+
+panelA = res.no.legend$gl.plot 
+panelB = res.no.legend$drive.and.target.plot
+
+# Panel C: heatmap of max genetic load
+point.size = 3
+
+x_tick_marks = seq(1, 10, by = 2)
+y_tick_marks = seq(0.5, 0.95, by = 0.1)
+xindex = 2; yindex = 1
+z_tick_marks = y_tick_marks
+
+mingl = min(combined_data$avg_max_load) # 0.459
+maxgl = max(combined_data$avg_max_load) # 0.94
+
+zmin = 0.45; zmax = 0.95
+heat.maxGL = heatmap_detailed(csv = combined_data, xindex = xindex, yindex = yindex, zindex = 15,
+                       x_tick_marks = x_tick_marks, y_tick_marks = y_tick_marks,
+                       z_tick_marks = z_tick_marks, zlow = zmin, zhigh = zmax,
+                       color_scale = c("white", "red"),  xl = TeX(r"(Number of target sites ($n$))"), 
+                       yl = TeX(r"(Potential genetic load ($\lambda^*$))"),
+                       zl = TeX(r"($\max(\lambda(t))$)"),
+                       title = "", text_size = text_size, legend.pos = "right") +
+  geom_point(aes(x = 1, y = 0.95), color = palette[1], size = point.size) +
+  geom_point(aes(x = 5, y = 0.95), color = palette[2], size = point.size)+
+  geom_point(aes(x = 10, y = 0.95), color = palette[3], size = point.size)
+
+#ggsave(plot = heat.maxGL, filename = paste0("heatmap-max-load-legend.pdf"),
+#       width = 6, height = 6)
+
+panelC = heat.maxGL + theme(legend.position = "none")
+
+
+# Panel D: heatmap of time until genetic load falls below 20%
+zlow = floor(min(combined_data$avg_time_to_genetic_load_below_marker)) # 15
+zhigh = ceiling(max(combined_data$avg_time_to_genetic_load_below_marker)) # 109
+z_tick_marks = seq(15, 109, by = 30)
+
+heat.persist = heatmap_detailed(csv = combined_data, xindex = xindex, yindex = yindex, zindex = 19,
+                       x_tick_marks = x_tick_marks, y_tick_marks = y_tick_marks,
+                       z_tick_marks = z_tick_marks, zlow = zlow, zhigh = zhigh,
+                       color_scale = c("white", "dodgerblue"), xl = TeX(r"(Number of target sites ($n$))"), 
+                       yl = TeX(r"(Potential genetic load ($\lambda^*$))"),
+                       zl = TeX(r"($\tau$)"),
+                       title = "", text_size = text_size, legend.pos = "right")+
+  geom_point(aes(x = 1, y = 0.95), color = palette[1], size = point.size) +
+  geom_point(aes(x = 5, y = 0.95), color = palette[2], size = point.size)+
+  geom_point(aes(x = 10, y = 0.95), color = palette[3], size = point.size)
+
+#ggsave(plot = heat.persist, filename = paste0("heatmap-time-to-below20-legend.pdf"),
+#       width = 6, height = 6)
+
+panelD = heat.persist + theme(legend.position = "none")
+
+
+# Combine the panels
+dist.h = -0.25
+dist.w = 0.45
+
+combined = plot_grid(panelA, NULL, panelC,
+                     NULL, NULL, NULL,
+                     panelB, NULL, panelD,
+                     align = "hv", nrow = 3, ncol = 3,
+                     rel_widths = c(1, dist.w, 1),
+                     rel_heights = c(1, dist.h, 1))
+
+# Save by uncommenting line below:
+
+#ggsave(plot = combined, filename = paste0("combined-panel-n-vs-lambda-drive1-target0.8.pdf"), width = 12, height = 12)
+```
+
+
+## Multilocus plot with varying linkage (log jam plot)
+
+Panels A-D:
+```{r eval=F}
+rm(list = ls())
+if (!requireNamespace("here", quietly = TRUE)) install.packages("here")
+library(here)
+
+source(here("multilocus-suppression-functions.R"))
+
+# Calculate necessary text size, based on the size of the Adobe Illustrator artboard 
+# and the amount of scaling done in Overleaf
+sizes = calculate_text_size(1080, 1, 11)
+text_size = sizes$text_size
+
+# Color palette for rho
+rho.cols = rev(c(
+  "black",
+  "#440154FF",  
+  "#414487FF",  
+  "#2A788EFF", 
+  "#22A884FF",  
+  "#7AD151FF", 
+  "#E5D510FF"   
+))
+
+max_gen = 100
+linewidth = 1
+
+dir = here("data/log-jam/lambda0.95-drive1-target0.8/")
+data = read_csv(paste0(dir, "n-vs-rho-lambda0.95-drive1-targets0.8-summary.csv"), col_names = T)
+
+# Get plots summarizing the trends
+res.jam =  log_jam_summary_plots(data = data,
+                                 text_size = text_size, linewidth = 1, 
+                                 point_size = 2.5, rho_colors = rho.cols)
+#ggsave(plot= res.jam$max.gl, filename = "legend-log-jam.pdf", width = 6, height = 6)
+
+
+# Panels A and B: max genetic load and time until this state
+panelA = res.jam$max.gl + theme(legend.position = "none") +
+  scale_y_continuous(breaks = seq(0.5, 1, length.out = 6), limits = c(0.5,1))
+
+panelB = res.jam$time.max.gl + theme(legend.position = "none") +
+  scale_y_continuous(breaks = seq(10,15, by = 1), limits = c(10,15.5))
+
+# Panels C and D: ending genetic load and avg time to GL < 20% (only showing params where this happened more than once)
+panelC = res.jam$ending.gl + theme(legend.position = "none")
+
+panelD = res.jam$time.gl.below.0.2.given.rate.above.10 + theme(legend.position = "none") +
+  scale_y_continuous(breaks = seq(0, 6000, by = 2000), limits = c(0, 6300))
+
+
+# Combine plots
+dist.w = 0.05; dist.h = 0
+combined = plot_grid(panelA, NULL, panelB,
+                     NULL, NULL, NULL,
+                     panelC, NULL, panelD,
+                     nrow = 3, ncol = 3, 
+                     align = "hv", rel_widths = c(1, dist.w, 1),
+                     rel_heights = c(1, dist.h, 1))
+
+# Save by uncommenting line below:
+ggsave(plot = combined, width = 14.73462, height = 14, filename = paste0("log-jam-panels-ABCD.pdf"))
+```
+
+Panels E and F: replicates of n = 4, rho = 1e-7. Note: I added haplotype diagrams in PowerPoint.
+
+```{r eval=F}
+rm(list = ls())
+if (!requireNamespace("here", quietly = TRUE)) install.packages("here")
+library(here)
+
+source(here("multilocus-suppression-functions.R"))
+
+# Calculate necessary text size, based on the size of the Adobe Illustrator artboard 
+# and the amount of scaling done in Overleaf
+sizes = calculate_text_size(1080, 1, 11)
+text_size = sizes$text_size
+
+base = here("data/log-jam/lambda0.95-drive1-target0.8/") # where data is stored
+
+# Panel E: log jam but escapes
+data4.1 = read_csv(here(paste0(base, "log-jam-1e-7/num_targets4/","20251101122549_6412581988158431629_output.csv")))
+p4.1 = plot_multilocus_single_replicate(data4.1, 
+                                        add_genetic_load = F, 
+                                        add_frequencies = T,
+                                        text_size = text_size,
+                                        linewidth = 1, alpha = 1)
+
+# Save by uncommenting line below:
+# ggsave(plot = p4.1, filename = paste0("raw-legend-log-jam-4-targets-rho1e-7-rep1.pdf"), width = 8, height = 8)
+
+# Panel F: perpetual log jam
+data5 = read_csv(here(paste0(base, "log-jam-1e-7/num_targets4/","20251101142128_5898902782196442742_output.csv")))
+p4.2 = plot_multilocus_single_replicate(data5, 
+                                        add_genetic_load = F, 
+                                        add_frequencies = T,
+                                        text_size = text_size,
+                                        linewidth = 1, alpha = 1)
+
+# Save by uncommenting line below:
+
+# ggsave(plot = p4.2 + scale_x_continuous(expand = expansion(mult = 0.1)), filename = paste0("raw-log-jam-4-targets-rho1e-7-rep2.pdf"),width = 8, height = 8)
+```
+
+
+
+
