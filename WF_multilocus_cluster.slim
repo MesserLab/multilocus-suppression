@@ -1,52 +1,47 @@
 initialize(){
-
-	setSeed(5898902782196442742);
 	
-	defineConstant("PLOT_HOMZ_COUNTS", F); // liveplots the count of homz disrupted sites each generation
-	defineConstant("PRINT_COMMON_HAPLOTYPES", F); // prints the most common haplotypes every generation (SLOW, better to call reportHaplotypeCounts() from the Eidos console)
-	defineConstant("NUM_HAPLOTYPES_PRINT", 10); // only print the NUM_HAPLOTYPES_PRINT most common haplotypes
-	
-	// directory for data storage (folder must be created in advance)	
-	defineCfgParam("make_csv", 0);
-	
-	defineCfgParam("path", paste0(getwd(), "/"));
+	// csv constants	
+	defineCfgParam("make_csv", 0); // whether to create a csv file summarizing each generation
+	defineCfgParam("path", paste0(getwd(), "/")); 	// directory for data storage (folder must be created in advance)	
 	
 	// general constants
 	defineCfgParam("population_size", 1e4);
 	defineCfgParam("release_size", 200); // represents a 1% drive allele frequency
-	defineCfgParam("recomb_rate", 1e-7); // 0.5 default
+	defineCfgParam("recomb_rate", 0.5); // between target sites only (drive locus is always unlinked)
 	defineCfgParam("shared_cas9", 0); // whether cas9 is shared between the drive site and target sites
-	defineCfgParam("baseline_cleavage_rate", 0.8); // max cleavage rate for no saturation
-	defineCfgParam("saturation_factor", 0.0);
+	defineCfgParam("baseline_cleavage_rate", 0.8); // baseline target site cleavage rate
+	defineCfgParam("saturation_factor", 0.0); // set to 0.0 for no saturation
 	
-	// constants for drive locus
-	defineCfgParam("resistance_rate", 0.001);  // functional resistance at drive locus
+	// constants for the drive locus
+	defineCfgParam("resistance_rate", 0.01);  // functional resistance at drive locus
 	defineCfgParam("drive_coeff", 0.1);  // selection coefficient of drive allele
-	
 	defineCfgParam("drive_dom", 0.5);  // dominance of drive allele
-	defineCfgParam("drive_cleavage_rate", 1.0); // drive_cut_rate if shared_cas9 = F
+	defineCfgParam("drive_cleavage_rate", 1.0); // drive_cut_rate if shared_cas9 = 0
 	
 	// constants for distant target loci
-	defineCfgParam("num_target_loci", 4);  // either linked or unlinked
+	defineCfgParam("num_target_loci", 5);  // either linked or unlinked
 	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci	
-	defineCfgParam("broken_coeff", 0.514508228292677);  // cost of disrupted allele at a target site
+	defineCfgParam("broken_coeff", 0.43);  // fitness cost of each disrupted target
 	defineCfgParam("sd_broken_coeff", 0);  // sd of rnorm for fitness cost
 	defineCfgParam("broken_dom", 0);  // dominance of disrupted allele at a target site
 	
 	// constants for tracking output
-	defineCfgParam("end_simulation_at_genetic_load_cutoff", 0);
-	defineCfgParam("recovery_val", 0.2); // when GL < 0.2, end simulation
+	defineCfgParam("recovery_val", 0.2); // genetic load signifying recovery
+	defineCfgParam("end_simulation_at_genetic_load_cutoff", 0); // whether to end the simulation when the genetic load falls below this
+	defineConstant("PLOT_HOMZ_COUNTS", F); // whether to liveplot the count of homozygous disrupted target sites each generation
+	defineConstant("PRINT_COMMON_HAPLOTYPES", F); // prints the most common haplotypes every generation 
+	defineConstant("NUM_HAPLOTYPES_PRINT", 10); // when PRINT_COMMON_HAPLOTYPES = T, only print the NUM_HAPLOTYPES_PRINT most common haplotypes
 	
 	// constants based on other defined constants
 	defineConstant("cleavage_rate", ifelse(shared_cas9==1, baseline_cleavage_rate/((num_target_loci + 1)^(saturation_factor)), baseline_cleavage_rate/((num_target_loci)^(saturation_factor))));
 	defineConstant("disruption_rate", cleavage_rate);  // creating non-functional alleles at target loci
 	defineConstant("drive_cut_rate", ifelse(shared_cas9==1, cleavage_rate, drive_cleavage_rate)); // cutting the wild-type allele at drive locus
 	
-	// genetic load must increase above 0.2 and then eventually fall below
 	defineGlobal("genetic_load_below_val", F);
 	defineGlobal("genetic_load_rose_above_val", F);
 	defineGlobal("time_to_recovery", -1);
 	defineGlobal("genetic_load_track", c());
+	
 	
 	catn("==============================");
 	catn(paste("TARGET_CUT_RATE::", disruption_rate, "DRIVE_CUT_RATE::", drive_cut_rate));
@@ -98,7 +93,7 @@ initialize(){
 		}
 		defineGlobal("output", file);
 		
-		//determine the file name
+		// determine the file name
 		date_time = paste0(c(rev(strsplit(date(), sep="-")), strsplit(time(), sep=":")));
 		seed = getSeed();
 		defineConstant("file_name", path + date_time + "_" + seed + "_output.csv");
@@ -121,10 +116,28 @@ function (void) defineCfgParam(string$ name, lifs value) {
 }
 
 function (string)haplotypeString(o<Haplosome>$ genome){
-	// Converts an individual's haplotype at the disrupted sites to a string
+	// Converts an individual's haplosome to a string
+	
+	// drive site key:
+	// d_ = drive
+	// w_ = wild-type at drive locus
+	// r_ = resistant at drive locus
+	
+	// target sites key:
 	// b = disrupted
 	// w = wild-type (undisrupted)
 	// r = resistant
+	
+	
+	contains_drive = genome.countOfMutationsOfType(m2) > 0;
+	contains_wt =  genome.countOfMutationsOfType(m1) > 0;
+	contains_r = genome.countOfMutationsOfType(m3) > 0;
+	if (contains_drive)
+		d_letter = "d_";
+	else if (contains_wt)
+		d_letter = "w_";
+	else if (contains_r)
+		d_letter = "r_";
 	
 	pos_disrupted = genome.positionsOfMutationsOfType(m5);
 	pos_wildtype = genome.positionsOfMutationsOfType(m4);
@@ -135,12 +148,13 @@ function (string)haplotypeString(o<Haplosome>$ genome){
 	
 	combined_dis_wt_r1 = c(pos_disrupted, pos_wildtype, pos_r1);
 	parallel_dis_wt_r1 = c(parallel_disrupted, parallel_wildtype, parallel_r1);
-
+	
 	ordering = order(combined_dis_wt_r1);
-
+	
 	haplotype_order = parallel_dis_wt_r1[ordering];
-
+	
 	haplotype = paste0(haplotype_order);
+	haplotype = paste0(d_letter, haplotype);
 	
 	return haplotype;
 }
@@ -149,10 +163,8 @@ function (string)haplotypeString(o<Haplosome>$ genome){
 function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 	// Lists the max_num_report most common haplotypes and their counts
 	// if max_num_report is -1, reports ALL of them
-	// b = disrupted
-	// w = wild-type (undisrupted)
-	// r = resistant
-
+	// see haplotypeString for key
+	
 	all = p1.individuals;
 	haplos = c();
 	
@@ -188,17 +200,18 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 
 
 100: modifyChild(){
-	// need to find the heterozygote (wt/d or d/wt) parents
+
+	// Determine if parent had drive
 	parent1_wt = sum(parent1.haplosomes.countOfMutationsOfType(m1)) == 1;
 	parent1_d = sum(parent1.haplosomes.countOfMutationsOfType(m2)) == 1;
 	parent2_wt = sum(parent2.haplosomes.countOfMutationsOfType(m1)) == 1;
 	parent2_d = sum(parent2.haplosomes.countOfMutationsOfType(m2)) == 1;
 	
-	// look at all wild-type alleles in the child
+	// Look at all wild-type alleles in the child
 	child1_wt = child.haploidGenome1.countOfMutationsOfType(m1) == 1;
 	child2_wt = child.haploidGenome2.countOfMutationsOfType(m1) == 1;
 	
-	// child genome 1 wt and heterozygote parent 1
+	// Child is wild-type at drive locus and parent had drive: simulate homing or resistance
 	if (child1_wt & parent1_wt & parent1_d){
 		// cleavage
 		if (runif(1) < drive_cut_rate){
@@ -209,7 +222,6 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 				// HDR to introduce the drive allele
 				child.haploidGenome1.addMutations(DRIVE);}}}
 	
-	// child genome 2 wt and heterozygote parent 2
 	if (child2_wt & parent2_wt & parent2_d){
 		// cleavage
 		if (runif(1) < drive_cut_rate){
@@ -220,6 +232,7 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 				// HDR to introduce the drive allele
 				child.haploidGenome2.addMutations(DRIVE);}}}
 	
+	// Simulate possible cleavage at the targets
 	if (num_target_loci > 0){
 		// if parent 1 has at least one drive allele, it can disrupt the target loci
 		if (sum(parent1.haplosomes.countOfMutationsOfType(m2)) > 0){
@@ -267,6 +280,7 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 }
 
 100: fitnessEffect(){
+
 	// first make a fitness placeholder with no effect
 	ind_fitness = 1.0;
 	
@@ -318,7 +332,6 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 
 
 101: early(){
-	// contribute to output file
 	
 	// store the fitness value
 	defineGlobal("fitness", mean(p1.cachedFitness(NULL)));
@@ -328,6 +341,7 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 	}
 	
 	
+	// Determine if the genetic load fell below 20% (after rising above this initially)
 	defineGlobal("genetic_load_track", c(genetic_load_track, genetic_load));
 	
 	gen_marker = 0;
@@ -346,7 +360,6 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 		defineGlobal("genetic_load_below_val", T);
 		gen_marker = 1;
 	}
-	
 	
 	// calculate frequencies of each mutation type
 	wild = sum(p1.individuals.countOfMutationsOfType(m1))/(2*population_size);
@@ -414,16 +427,17 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 		mean_num_disrupted_on_haplotype = 0;
 	}
 	
-	
-	
 	gen = sim.cycle - 100;
 	
+	// print summary to console
 	catn(paste("GEN::", gen,"MEAN_FITNESS:", fitness,"DRIVE_RATE:", drive, "WT_AT_DRIVE_RATE:",wild, "R1_AT_DRIVE_RATE:", resist,"DISRUPTED_RATE:", broken, "WT_AT_DISRUPTED_RATE:",wild2,"R1_AT_DISRUPTED_RATE:", func,"GENETIC_LOAD:", genetic_load, "AVG_HOMZ_TARGET_COUNT:", avg_homz_target_count, "AVG_NUM_DISRUPTED_ON_HAPLOSOME:", mean_num_disrupted_on_haplotype));
 	
-	if (num_target_loci > 0){
 	
-		catn("NUM_HOMZ_SITES_AND_COUNT::");
-		print(m_counts);
+	if (num_target_loci > 0){
+		
+		// Additional output	
+		//catn("NUM_HOMZ_SITES_AND_COUNT::");
+		//print(m_counts);
 		
 		if (PRINT_COMMON_HAPLOTYPES)
 			reportHaplotypeCounts(NUM_HAPLOTYPES_PRINT);
@@ -440,7 +454,9 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 		if (!writeFile(file_name, new_line, append = T)){stop("Error appending to output file.");}}
 	
 	
-	// drive loss
+	// Conditions that end the simulation:
+	
+	// Drive loss when n = 0
 	if (drive == 0){
 		catn(paste("DRIVE_LOST_AT_GEN:", gen));
 		
@@ -453,7 +469,7 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 		}
 	}
 	
-	// drive fixation
+	// Drive fixation when n = 0
 	if (drive == 1){
 		catn(paste("DRIVE_FIXED_AT_GEN:", gen));
 		
@@ -466,6 +482,7 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 		}
 	}
 	
+	// Genetic load < 20% when end_simulation_at_genetic_load_cutoff
 	if (end_simulation_at_genetic_load_cutoff & genetic_load_below_val){
 		ind = whichMax(genetic_load_track);
 		max_genetic_load = genetic_load_track[ind];
@@ -477,7 +494,7 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 	if (num_target_loci == 0)
 		return;
 	
-	// disrupted site fixation
+	// Disrupted site fixation or loss
 	if (broken == 0 & gen > 1){
 		catn(paste("DISRUPTED_LOST_AT_GEN:",gen));
 	} else if (broken == 1){
