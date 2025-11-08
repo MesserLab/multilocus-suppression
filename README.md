@@ -22,7 +22,7 @@ The SLiM file [WF_multilocus_cluster.slim](WF_multilocus_cluster.slim) was used 
 * `broken_dom=0.0`: this is the dominance coefficient of the disrupted target site. We always assumed recessive mutations and set this to 0.
 * `recovery_val=0.2`: we tracked the time until the genetic load imposed by the drive fell below this value.
 * `end_simulation_at_genetic_load_cutoff=0`: this is an option to end the simulation when the genetic load reached the state above. We didn't use this by default, since we wanted to observe later states of the population, particularly for the log-jam scenarios.
-* `PLOT_HOMZ_COUNTS=F`: this is an option to liveplot the number of individuals with 0, 1, ..., `num_target_loci` homozygous disrupted target sites. It is helpful for observing log-jam scenarios and should only be used when running SLiM on the GUI.
+* `PLOT_HOMZ_COUNTS=F`: this is an option to liveplot the number of individuals with 0, 1, ..., `num_target_loci` homozygous disrupted target sites. It is helpful for observing log-jam scenarios but was not used by default.
 * `PRINT_COMMON_HAPLOTYPES=F`: this is an option to print the most common haplotypes each generation to the SLiM console. This makes the simulation much slower, so I recommend turning this off and instead calling the `reportHaplotypeCounts` function from the Eidos console at desired generations.
 * `NUM_HAPLOTYPES_PRINT=10`: when `PRINT_COMMON_HAPLOTYPES=T`, this parameter would control the number of haplotypes printed to the console. 
 
