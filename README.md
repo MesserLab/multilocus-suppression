@@ -1,4 +1,4 @@
-## README
+## A resistance-robust suppression gene drive leveraging the accumulation of recessive deleterious mutations
 
 This repository contains all code and data needed to reproduce results from "A resistance-robust suppression gene drive leveraging the accumulation of recessive deleterious mutations".
 
