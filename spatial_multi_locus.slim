@@ -40,6 +40,8 @@ species all initialize() {
 	defineCfgParam("FORAGING_AREA", 0.01); // competition distance
 	defineCfgParam("NODES_PER_FORAGING_AREA", 1);	
 	defineCfgParam("MIGRATION_DISTANCE", 0.02); // also equal to the mating distance 
+	defineCfgParam("TRACK_NN", T); // whether to compute NN stats for chasing	d			
+	defineCfgParam("NN_DISTANCE", 0.49); // max distance between NN
 
 	
 	// Drop parameters
@@ -62,6 +64,9 @@ species all initialize() {
 	
 	// Mating -- only female animals feel this from male animals
 	initializeInteractionType(2, "xy", reciprocal=T, maxDistance=MIGRATION_DISTANCE, sexSegregation="FM");
+	
+	// NN index -- everyone feels from everyone
+	initializeInteractionType(3, "xy", reciprocal=T, maxDistance=NN_DISTANCE);
 	
 }
 
@@ -108,6 +113,39 @@ species animal initialize() {
 	variations.convertToSubstitution = F;
 
 }
+
+//// TRACKING NN INDEX
+function (void)NNI(void) {
+
+	i3.evaluate(c(p2)); // check which one to use
+	
+	adults = p2.individuals;
+
+	adult_popsize = p2.individualCount;
+	
+	if (adult_popsize == 0)
+		return;
+	
+	expected_distance = 0.5*sqrt(1/adult_popsize); 
+	ngenomes = 2*adult_popsize;
+	ndrive_alleles = sum(adults.countOfMutationsOfType(m2));
+	rate = ndrive_alleles/ngenomes;
+	
+	nni = c();
+	for (i in seqLen(adult_popsize)){
+		ind = adults[i];
+		nearest_neighbor = i3.nearestNeighbors(ind, count = 1);
+		distance_nn = i3.distance(ind, nearest_neighbor);
+		nni_ind = distance_nn/expected_distance; 
+		nni = c(nni, nni_ind);
+	}
+	
+	avg_NNI = mean(nni);
+	var_NNI = var(nni);
+	
+	catn('    AVG_NN: ' + avg_NNI + ' VAR_NN:' + var_NNI);
+}
+
 
 
 //// HELPER FUNCTION FOR CONSTANTS THAT MAY ALSO BE CONFIGURED VIA COMMAND LINE.
@@ -502,6 +540,10 @@ ticks all late(){
 	
 	// Output for humans to look at:
 	catn("gen: " + gen + "\tsize: " + pop_size + "\nwt: " + rate_wt + "\tdr: " + rate_dr + "\tr1: " + rate_r1 + "\nwt2: " + rate_wt2 + "\tbr: " + rate_b + "\tfr: " + rate_f);
+	
+	if (TRACK_NN){
+		NNI();
+	}
 	
 	// End Conditions (once the drive has been released)
 	
