@@ -14,7 +14,8 @@ The SLiM file [WF_multilocus_cluster.slim](WF_multilocus_cluster.slim) was used 
 * `population_size=1e4`: we always kept the population size fixed at 10,000
 * `release_size=200`: this is the number of drive heterozygotes introduced at generation 100. Setting this to 200 ensures an initial drive allele frequency of 1%.
 * `shared_cas9=0`: this is an option to simulate Cas9 saturation across the drive and target loci. This was turned off by default.
-* `baseline_cleavage_rate=0.8`: this is the baseline germline cleavage rate at the target loci when there's no Cas9 saturation.
+* `baseline_cleavage_rate=0.5`: this is the baseline germline cleavage rate at the target loci when there's no Cas9 saturation. 
+  + note: we used 0.8 before; now switching to 0.5
 * `saturation_factor=0.0`: this is a parameter controlling how much the target cleavage rate decline with `num_target_loci` due to Cas9 saturation. Setting this to 0.0 ensures there's no saturation effect.
 * `drive_cleavage_rate=1.0`: we assumed perfect germline cleavage at the drive locus
 * `func_resist_rate=0.01`: this is the resistance rate at the target loci (only used when `num_target_loci` > 0)
@@ -34,6 +35,12 @@ The SLiM file [WF_multilocus_cluster.slim](WF_multilocus_cluster.slim) was used 
 * `drive_dom`: this is the dominance coefficient at the drive locus. We set this to 0.0 for the single-locus section and 0.5 for the multilocus section.
 * `num_target_loci`: this was varied throughout the paper. For the single-locus drives, we set this to 0 and for the multilocus drives, we explored 1,2,...,10.
 * `broken_coeff`: this is the fitness cost of target site disruption. We varied this based on the `num_target_loci` and the target potential genetic load.
+
+* `func_resist_rate`: for the multilocus unlinked drives, we will vary this in (0.01, 1/3)
+* Cas9 saturation:
+    + `saturation_factor`: exploring 0.0 (no saturation), 0.5 (some saturation), 1 (strong saturation)
+    + `baseline_cleavage_rate`: 0.5 by default, with no saturation. When saturation is simulated, we set `baseline_cleavage_rate = 1`
+
 
 ## Data
 
