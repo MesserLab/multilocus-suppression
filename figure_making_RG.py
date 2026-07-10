@@ -1,6 +1,9 @@
+import glob
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import seaborn as sns
 
 # make plot theme more like R
@@ -11,10 +14,17 @@ custom_params = {"font.family": "DejaVu Sans", "axes.facecolor": "white", "axes.
 sns.set_style("whitegrid", rc=custom_params)
 plt.rcParams.update(custom_params)
 
-# read the data
-file = "/SSD/reg259/gene_drive_sims/multilocus-suppression/data/s-vs-n-r1-high.csv"
-save_dir = "/SSD/reg259/gene_drive_sims/multilocus-suppression/figures-r1-high"
-df = pd.read_csv(file)
+
+def add_panel_label(fig, ax, label, dx_in=-0.5, dy_in=0.08):
+    # anchored to each axes' own bounding box with a constant *absolute* (inch)
+    # offset, rather than an axes-fraction offset -- axes-fraction x/y scales with
+    # that axes' own width/height, so panels of different widths (e.g. heatmaps
+    # with a colorbar carving out space vs. plain trajectory plots) end up with
+    # visibly different absolute offsets even when given the "same" -0.1 fraction
+    pos = ax.get_position()
+    x = pos.x0 + dx_in / fig.get_figwidth()
+    y = pos.y1 + dy_in / fig.get_figheight()
+    fig.text(x, y, label, fontsize=18, fontweight="bold", va="bottom", ha="left")
 
 
 def make_grid_edges(n_vals, s_vals):
@@ -27,16 +37,14 @@ def make_grid_edges(n_vals, s_vals):
     return n_edges, s_edges
 
 
-def make_max_load_heatmap(save_dir):
+def plot_max_load_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15):
     pivot = df.pivot(index="target_fitness_cost", columns="num_targets", values="avg_max_load")
     n_vals = pivot.columns.values.astype(float)
     s_vals = pivot.index.values.astype(float)
     n_edges, s_edges = make_grid_edges(n_vals, s_vals)
 
-    fig, ax = plt.subplots(figsize=(6, 4.875))
-
     mesh = ax.pcolormesh(n_edges, s_edges, pivot.values, cmap="viridis", vmin=0, vmax=1, shading="flat")
-    cbar = fig.colorbar(mesh, ax=ax, shrink=0.7, pad=0.08)
+    cbar = ax.figure.colorbar(mesh, ax=ax, shrink=0.7, pad=cbar_pad, fraction=cbar_fraction)
     cbar.ax.set_title("Avg max\ngenetic load", fontsize=10, pad=10)
 
     # theoretical maximum load, evaluated on a fine grid for smooth contour lines
@@ -74,18 +82,20 @@ def make_max_load_heatmap(save_dir):
     ax.set_ylabel("Disrupted target site fitness cost (s)")
     ax.grid(False)
 
+
+def make_max_load_heatmap(df, save_dir):
+    fig, ax = plt.subplots(figsize=(6.5, 5))
+    plot_max_load_heatmap(ax, df)
     fig.tight_layout()
-    fig.savefig(f"{save_dir}/s-vs-n-max-load-heatmap.png", dpi=300)
+    fig.savefig(f"{save_dir}/s-vs-n-max-load-heatmap.png", dpi=450)
 
 
-def make_recovery_time_heatmap(save_dir):
+def plot_recovery_time_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15):
     pivot = df.pivot(index="target_fitness_cost", columns="num_targets",
         values="avg_time_to_genetic_load_below_marker")
     n_vals = pivot.columns.values.astype(float)
     s_vals = pivot.index.values.astype(float)
     n_edges, s_edges = make_grid_edges(n_vals, s_vals)
-
-    fig, ax = plt.subplots(figsize=(6, 4.875))
 
     # -1 marks parameter combos that theoretically never recover (genetic load
     # never falls back below the marker) -- mask these out to light gray
@@ -94,7 +104,7 @@ def make_recovery_time_heatmap(save_dir):
     cmap.set_bad("#DCDCDC")
 
     mesh = ax.pcolormesh(n_edges, s_edges, plot_values, cmap=cmap, shading="flat")
-    cbar = fig.colorbar(mesh, ax=ax, shrink=0.7, pad=0.08)
+    cbar = ax.figure.colorbar(mesh, ax=ax, shrink=0.7, pad=cbar_pad, fraction=cbar_fraction)
     cbar.ax.set_title("Avg time\nto recover", fontsize=10, pad=10)
 
     ax.set_xticks(n_vals)
@@ -103,9 +113,148 @@ def make_recovery_time_heatmap(save_dir):
     ax.set_ylabel("Disrupted target site fitness cost (s)")
     ax.grid(False)
 
+
+def make_recovery_time_heatmap(df, save_dir):
+    fig, ax = plt.subplots(figsize=(6.5, 5))
+    plot_recovery_time_heatmap(ax, df)
     fig.tight_layout()
-    fig.savefig(f"{save_dir}/s-vs-n-time-to-recover-heatmap.png", dpi=300)
+    fig.savefig(f"{save_dir}/s-vs-n-time-to-recover-heatmap.png", dpi=450)
 
 
-make_max_load_heatmap(save_dir)
-make_recovery_time_heatmap(save_dir)
+def load_avg_trajectory(data_dir, n, s):
+    # each replicate stops once it reaches an absorbing state (drive lost/fixed),
+    # so its final genetic load holds steady for any generation beyond that --
+    # forward-fill each replicate out to the longest-running replicate before
+    # averaging, rather than letting the average silently drop replicates
+    folder = os.path.join(data_dir, f"s{s}_n{n}")
+    rep_files = sorted(glob.glob(os.path.join(folder, "*.csv")))
+
+    reps = []
+    for rep_file in rep_files:
+        rep_df = pd.read_csv(rep_file, skipinitialspace=True)
+        reps.append(rep_df.set_index("gen_num")["genetic_load"])
+
+    max_gen = int(max(rep.index.max() for rep in reps))
+    full_index = np.arange(1, max_gen + 1)
+    reps = [rep.reindex(full_index).ffill() for rep in reps]
+
+    return pd.concat(reps, axis=1).mean(axis=1)
+
+
+def plot_trajectory_lines(ax, df, data_dir, param_combos, colors):
+    # param_combos: list of (n, s) tuples, one per line, in the same order as colors
+    drive_cost = df["drive_fitness_cost"].unique()[0]
+
+    for (n, s), color in zip(param_combos, colors):
+        avg_load = load_avg_trajectory(data_dir, n, s)
+        ax.plot(avg_load.index, avg_load.values, color=color, linewidth=1.5, zorder=3)
+
+        theoretical_max_load = 1 - ((1 - drive_cost) * ((1 - s) ** n))
+        ax.axhline(theoretical_max_load, color=color, linestyle="dashed", linewidth=1.2, zorder=2)
+
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Average genetic load")
+    ax.set_xlim(0, 100)
+
+
+def add_side_trajectory_legends(ax, colors, value_labels, fixed_label, inside=False):
+    x_pos = 0.82 if inside else 1.02
+    
+    # three separate legends stacked to the right of the axes: varying-parameter
+    # colors, the fixed-parameter value, and the realized/potential line-style key
+    value_handles = [Line2D([0], [0], color=color, linewidth=1.5) for color in colors]
+    value_legend = ax.legend(value_handles, value_labels, loc="upper left", bbox_to_anchor=(x_pos, 1.0),
+        frameon=True, framealpha=1.0, handlelength=1.5)
+    ax.add_artist(value_legend)
+
+    fixed_legend = ax.legend([Line2D([0], [0], color="none")], [fixed_label], loc="upper left",
+        bbox_to_anchor=(x_pos, 0.8), frameon=True, framealpha=1.0, handlelength=0, handletextpad=0)
+    ax.add_artist(fixed_legend)
+
+    style_handles = [Line2D([0], [0], color="black", linestyle="solid"),
+        Line2D([0], [0], color="black", linestyle="dashed")]
+    style_labels = ["realized", "potential"]
+    ax.legend(style_handles, style_labels, loc="upper left", bbox_to_anchor=(x_pos, 0.7), frameon=True, framealpha=1.0)
+
+
+def make_vary_n_fixed_s_trajectories(df, data_dir, save_dir):
+    n_vals = [1, 5, 10]
+    s = 0.3
+    colors = ["#2a78d6", "#1baf7a", "#eda100"]
+
+    fig, ax = plt.subplots(figsize=(7.5, 5))
+    plot_trajectory_lines(ax, df, data_dir, [(n, s) for n in n_vals], colors)
+    add_side_trajectory_legends(ax, colors, [f"n = {n}" for n in n_vals], f"s = {s}")
+
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.78)
+    fig.savefig(f"{save_dir}/vary-n-fixed-s-trajectories.png", dpi=450)
+
+
+def make_vary_s_fixed_n_trajectories(df, data_dir, save_dir):
+    n = 10
+    s_vals = [0.1, 0.2, 0.3]
+    colors = ["#2a78d6", "#1baf7a", "#eda100"]
+
+    fig, ax = plt.subplots(figsize=(7.5, 5))
+    plot_trajectory_lines(ax, df, data_dir, [(n, s) for s in s_vals], colors)
+    add_side_trajectory_legends(ax, colors, [f"s = {s}" for s in s_vals], f"n = {n}")
+
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.78)
+    fig.savefig(f"{save_dir}/vary-s-fixed-n-trajectories.png", dpi=450)
+
+
+def make_combined_figure(df, data_dir, save_dir):
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    colors = ["#2a78d6", "#1baf7a", "#eda100"]
+
+    # a tighter colorbar (less pad/fraction reserved for it) leaves more of each
+    # heatmap's own axes for the pcolormesh itself, widening A/B; this doesn't
+    # touch C/D since they have no colorbar, and doesn't touch tight_layout's
+    # own spacing since that's set by the pad= below, unchanged
+    plot_max_load_heatmap(axes[0, 0], df, cbar_fraction=0.1)
+    plot_recovery_time_heatmap(axes[0, 1], df, cbar_fraction=0.1)
+
+    plot_trajectory_lines(axes[1, 0], df, data_dir, [(1, 0.3), (5, 0.3), (10, 0.3)], colors)
+    add_side_trajectory_legends(axes[1, 0], colors, ["n = 1", "n = 5", "n = 10"], "s = 0.3", inside=True)
+
+    plot_trajectory_lines(axes[1, 1], df, data_dir, [(10, 0.1), (10, 0.2), (10, 0.3)], colors)
+    add_side_trajectory_legends(axes[1, 1], colors, ["s = 0.1", "s = 0.2", "s = 0.3"], "n = 10", inside=True)
+
+    # rect reserves a small top margin (uniformly, so relative row/column spacing
+    # is untouched) -- without it, row 1's axes sit right at the top edge of the
+    # page and the panel labels below get pushed past the figure boundary and clipped.
+    # w_pad/h_pad add extra breathing room between the four subplots themselves
+    fig.tight_layout(pad=0.15, w_pad=3.0, h_pad=3.0, rect=[0, 0, 1.005, 0.965])
+
+    # added after tight_layout, once each axes' final position is known, so all
+    # four labels line up on the same absolute offset instead of an axes-fraction one
+    for label, ax in zip(["A", "B", "C", "D"], axes.flat):
+        add_panel_label(fig, ax, label)
+
+    fig.savefig(f"{save_dir}/combined-figure.pdf")
+
+
+# create figures for the default parameter set
+df = pd.read_csv("data/s-vs-n-default.csv")
+data_dir = "data/default"
+save_dir = "figures/default"
+
+make_max_load_heatmap(df, save_dir)
+make_recovery_time_heatmap(df, save_dir)
+make_vary_n_fixed_s_trajectories(df, data_dir, save_dir)
+make_vary_s_fixed_n_trajectories(df, data_dir, save_dir)
+make_combined_figure(df, data_dir, save_dir)
+
+
+# repeat for high r1 rate
+df = pd.read_csv("data/s-vs-n-r1-high.csv")
+data_dir = "data/r1-high"
+save_dir = "figures/r1-high"
+
+make_max_load_heatmap(df, save_dir)
+make_recovery_time_heatmap(df, save_dir)
+make_vary_n_fixed_s_trajectories(df, data_dir, save_dir)
+make_vary_s_fixed_n_trajectories(df, data_dir, save_dir)
+make_combined_figure(df, data_dir, save_dir)

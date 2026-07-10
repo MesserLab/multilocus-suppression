@@ -6,3 +6,5 @@ cluster/
 paper-figures/
 data/.DS_Store
 .DS_Store
+data/default/
+data/r1-high/
