@@ -157,24 +157,36 @@ def plot_trajectory_lines(ax, df, data_dir, param_combos, colors):
     ax.set_xlim(0, 100)
 
 
-def add_side_trajectory_legends(ax, colors, value_labels, fixed_label, inside=False):
-    x_pos = 0.82 if inside else 1.02
-    
+def add_side_trajectory_legends(ax, colors, value_labels, fixed_label=None, inside=False):
+    # anchored at the axes' own top-right/top-left corner (rather than a fixed
+    # x fraction past the right edge) so a wider legend -- e.g. long "n = 10,
+    # s = 0.25" value labels -- grows back into the axes instead of overflowing
+    # past the figure boundary and getting clipped, which a right-edge anchor
+    # would let happen once labels get longer than the short single-parameter case
+    loc = "upper right" if inside else "upper left"
+    anchor_x = 0.98 if inside else 1.02
+
     # three separate legends stacked to the right of the axes: varying-parameter
     # colors, the fixed-parameter value, and the realized/potential line-style key
+    # -- when nothing is held fixed (e.g. both n and s vary together), fixed_label
+    # is omitted and the value legend drops down to take its place
     value_handles = [Line2D([0], [0], color=color, linewidth=1.5) for color in colors]
-    value_legend = ax.legend(value_handles, value_labels, loc="upper left", bbox_to_anchor=(x_pos, 1.0),
+    value_legend = ax.legend(value_handles, value_labels, loc=loc, bbox_to_anchor=(anchor_x, 1.0),
         frameon=True, framealpha=1.0, handlelength=1.5)
     ax.add_artist(value_legend)
 
-    fixed_legend = ax.legend([Line2D([0], [0], color="none")], [fixed_label], loc="upper left",
-        bbox_to_anchor=(x_pos, 0.8), frameon=True, framealpha=1.0, handlelength=0, handletextpad=0)
-    ax.add_artist(fixed_legend)
+    style_y = 0.7
+    if fixed_label is not None:
+        fixed_legend = ax.legend([Line2D([0], [0], color="none")], [fixed_label], loc=loc,
+            bbox_to_anchor=(anchor_x, 0.8), frameon=True, framealpha=1.0, handlelength=0, handletextpad=0)
+        ax.add_artist(fixed_legend)
+    else:
+        style_y = 0.8
 
     style_handles = [Line2D([0], [0], color="black", linestyle="solid"),
         Line2D([0], [0], color="black", linestyle="dashed")]
     style_labels = ["realized", "potential"]
-    ax.legend(style_handles, style_labels, loc="upper left", bbox_to_anchor=(x_pos, 0.7), frameon=True, framealpha=1.0)
+    ax.legend(style_handles, style_labels, loc=loc, bbox_to_anchor=(anchor_x, style_y), frameon=True, framealpha=1.0)
 
 
 def make_vary_n_fixed_s_trajectories(df, data_dir, save_dir):
@@ -205,6 +217,48 @@ def make_vary_s_fixed_n_trajectories(df, data_dir, save_dir):
     fig.savefig(f"{save_dir}/vary-s-fixed-n-trajectories.png", dpi=450)
 
 
+def make_vary_n_and_s_trajectories(df, data_dir, save_dir):
+    param_combos = [(10, 0.25), (1, 0.95)]
+    colors = ["#2a78d6", "#eda100"]
+
+    fig, ax = plt.subplots(figsize=(7.5, 5))
+    plot_trajectory_lines(ax, df, data_dir, param_combos, colors)
+    value_labels = [f"n = {n}\ns = {s}" for n, s in param_combos]
+    add_side_trajectory_legends(ax, colors, value_labels)
+
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.78)
+    fig.savefig(f"{save_dir}/vary-n-and-s-trajectories.png", dpi=450)
+
+
+def plot_percent_of_potential_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15):
+    # percent of the theoretical maximum genetic load actually realized
+    # (avg_max_load / theoretical_potential_load), already precomputed as
+    # fraction_of_max_load_attained -- pinning color scale to 0-1 across both
+    # parameter sets keeps panels comparable even though their data ranges differ
+    pivot = df.pivot(index="target_fitness_cost", columns="num_targets", values="fraction_of_max_load_attained")
+    n_vals = pivot.columns.values.astype(float)
+    s_vals = pivot.index.values.astype(float)
+    n_edges, s_edges = make_grid_edges(n_vals, s_vals)
+
+    mesh = ax.pcolormesh(n_edges, s_edges, pivot.values, cmap="viridis", vmin=0, vmax=1, shading="flat")
+    cbar = ax.figure.colorbar(mesh, ax=ax, shrink=0.7, pad=cbar_pad, fraction=cbar_fraction)
+    cbar.ax.set_title(r"$\frac{\text{realized}}{\text{potential}}$", fontsize=14, pad=16)
+
+    ax.set_xticks(n_vals)
+    ax.set_yticks(s_vals[::2])
+    ax.set_xlabel("Number of target sites (n)")
+    ax.set_ylabel("Disrupted target site fitness cost (s)")
+    ax.grid(False)
+
+
+def make_percent_of_potential_heatmap(df, save_dir):
+    fig, ax = plt.subplots(figsize=(6.5, 5))
+    plot_percent_of_potential_heatmap(ax, df)
+    fig.tight_layout()
+    fig.savefig(f"{save_dir}/s-vs-n-percent-of-potential-heatmap.png", dpi=450)
+
+
 def make_combined_figure(df, data_dir, save_dir):
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     colors = ["#2a78d6", "#1baf7a", "#eda100"]
@@ -225,8 +279,10 @@ def make_combined_figure(df, data_dir, save_dir):
     # rect reserves a small top margin (uniformly, so relative row/column spacing
     # is untouched) -- without it, row 1's axes sit right at the top edge of the
     # page and the panel labels below get pushed past the figure boundary and clipped.
-    # w_pad/h_pad add extra breathing room between the four subplots themselves
-    fig.tight_layout(pad=0.15, w_pad=3.0, h_pad=3.0, rect=[0, 0, 1.005, 0.965])
+    # w_pad/h_pad add extra breathing room between the four subplots themselves.
+    # right=0.995 (rather than past 1.0) leaves a sliver of margin so panel D's
+    # "100" x-tick label, which sits flush against its axes' right edge, isn't cropped
+    fig.tight_layout(pad=0.15, w_pad=3.0, h_pad=3.0, rect=[0, 0, 0.995, 0.965])
 
     # added after tight_layout, once each axes' final position is known, so all
     # four labels line up on the same absolute offset instead of an axes-fraction one
@@ -236,25 +292,72 @@ def make_combined_figure(df, data_dir, save_dir):
     fig.savefig(f"{save_dir}/combined-figure.pdf")
 
 
-# create figures for the default parameter set
-df = pd.read_csv("data/s-vs-n-default.csv")
-data_dir = "data/default"
-save_dir = "figures/default"
+def make_combined_n_and_s_percent_figure(df_default, data_dir_default, df_r1_high, data_dir_r1_high, save_dir):
+    # spans both parameter sets side by side (default in column 0, high r1 rate
+    # in column 1), so unlike make_combined_figure it can't be driven by a single
+    # df/data_dir pair
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    colors = ["#2a78d6", "#eda100"]
+    param_combos = [(10, 0.25), (1, 0.95)]
+    value_labels = [f"n = {n}\ns = {s}" for n, s in param_combos]
 
-make_max_load_heatmap(df, save_dir)
-make_recovery_time_heatmap(df, save_dir)
-make_vary_n_fixed_s_trajectories(df, data_dir, save_dir)
-make_vary_s_fixed_n_trajectories(df, data_dir, save_dir)
-make_combined_figure(df, data_dir, save_dir)
+    plot_trajectory_lines(axes[0, 0], df_default, data_dir_default, param_combos, colors)
+    add_side_trajectory_legends(axes[0, 0], colors, value_labels, inside=True)
+
+    plot_trajectory_lines(axes[0, 1], df_r1_high, data_dir_r1_high, param_combos, colors)
+    add_side_trajectory_legends(axes[0, 1], colors, value_labels, inside=True)
+
+    plot_percent_of_potential_heatmap(axes[1, 0], df_default, cbar_fraction=0.1)
+    plot_percent_of_potential_heatmap(axes[1, 1], df_r1_high, cbar_fraction=0.1)
+
+    # titled on both rows, not just the top -- a title on row 0 alone reads as
+    # describing only that panel, not the whole column beneath it
+    for ax in axes[:, 0]:
+        ax.set_title("r1 rate = 0.01")
+    for ax in axes[:, 1]:
+        ax.set_title("r1 rate = 1/3")
+
+    # top=0.985 (vs. the plain make_combined_figure's 0.965): tight_layout already
+    # reserves room for the per-axes titles above row 0 as part of laying out the
+    # axes themselves, so the extra top margin that make_combined_figure needs for
+    # its panel labels (which have no title to make way for) is mostly redundant
+    # here and was leaving a band of blank space above panels A/B
+    fig.tight_layout(pad=0.15, w_pad=3.0, h_pad=3.0, rect=[0, 0, 0.995, 0.985])
+
+    for label, ax in zip(["A", "B", "C", "D"], axes.flat):
+        add_panel_label(fig, ax, label)
+
+    fig.savefig(f"{save_dir}/combined-vary-n-and-s-percent-of-potential-figure.pdf")
+
+
+# create figures for the default parameter set
+df_default = pd.read_csv("data/s-vs-n-default.csv")
+data_dir_default = "data/default"
+save_dir_default = "figures/default"
+
+make_max_load_heatmap(df_default, save_dir_default)
+make_recovery_time_heatmap(df_default, save_dir_default)
+make_vary_n_fixed_s_trajectories(df_default, data_dir_default, save_dir_default)
+make_vary_s_fixed_n_trajectories(df_default, data_dir_default, save_dir_default)
+make_vary_n_and_s_trajectories(df_default, data_dir_default, save_dir_default)
+make_percent_of_potential_heatmap(df_default, save_dir_default)
+make_combined_figure(df_default, data_dir_default, save_dir_default)
 
 
 # repeat for high r1 rate
-df = pd.read_csv("data/s-vs-n-r1-high.csv")
-data_dir = "data/r1-high"
-save_dir = "figures/r1-high"
+df_r1_high = pd.read_csv("data/s-vs-n-r1-high.csv")
+data_dir_r1_high = "data/r1-high"
+save_dir_r1_high = "figures/r1-high"
 
-make_max_load_heatmap(df, save_dir)
-make_recovery_time_heatmap(df, save_dir)
-make_vary_n_fixed_s_trajectories(df, data_dir, save_dir)
-make_vary_s_fixed_n_trajectories(df, data_dir, save_dir)
-make_combined_figure(df, data_dir, save_dir)
+make_max_load_heatmap(df_r1_high, save_dir_r1_high)
+make_recovery_time_heatmap(df_r1_high, save_dir_r1_high)
+make_vary_n_fixed_s_trajectories(df_r1_high, data_dir_r1_high, save_dir_r1_high)
+make_vary_s_fixed_n_trajectories(df_r1_high, data_dir_r1_high, save_dir_r1_high)
+make_vary_n_and_s_trajectories(df_r1_high, data_dir_r1_high, save_dir_r1_high)
+make_percent_of_potential_heatmap(df_r1_high, save_dir_r1_high)
+make_combined_figure(df_r1_high, data_dir_r1_high, save_dir_r1_high)
+
+
+# 4-panel figure spanning both parameter sets: vary-n-and-s trajectories (top)
+# and percent-of-potential heatmaps (bottom), default vs high r1 rate
+make_combined_n_and_s_percent_figure(df_default, data_dir_default, df_r1_high, data_dir_r1_high, "figures")
