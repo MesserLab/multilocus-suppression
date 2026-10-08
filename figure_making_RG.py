@@ -330,6 +330,44 @@ def make_combined_n_and_s_percent_figure(df_default, data_dir_default, df_r1_hig
     fig.savefig(f"{save_dir}/combined-vary-n-and-s-percent-of-potential-figure.pdf")
 
 
+def make_combined_n_and_s_load_figure(df_default, data_dir_default, df_r1_high, data_dir_r1_high, save_dir):
+    # spans both parameter sets side by side (default in column 0, high r1 rate
+    # in column 1), so unlike make_combined_figure it can't be driven by a single
+    # df/data_dir pair
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    colors = ["#2a78d6", "#eda100"]
+    param_combos = [(10, 0.25), (1, 0.95)]
+    value_labels = [f"n = {n}\ns = {s}" for n, s in param_combos]
+
+    plot_trajectory_lines(axes[0, 0], df_default, data_dir_default, param_combos, colors)
+    add_side_trajectory_legends(axes[0, 0], colors, value_labels, inside=True)
+
+    plot_trajectory_lines(axes[0, 1], df_r1_high, data_dir_r1_high, param_combos, colors)
+    add_side_trajectory_legends(axes[0, 1], colors, value_labels, inside=True)
+
+    plot_max_load_heatmap(axes[1, 0], df_default, cbar_fraction=0.1)
+    plot_max_load_heatmap(axes[1, 1], df_r1_high, cbar_fraction=0.1)
+
+    # titled on both rows, not just the top -- a title on row 0 alone reads as
+    # describing only that panel, not the whole column beneath it
+    for ax in axes[:, 0]:
+        ax.set_title("r1 rate = 0.01")
+    for ax in axes[:, 1]:
+        ax.set_title("r1 rate = 1/3")
+
+    # top=0.985 (vs. the plain make_combined_figure's 0.965): tight_layout already
+    # reserves room for the per-axes titles above row 0 as part of laying out the
+    # axes themselves, so the extra top margin that make_combined_figure needs for
+    # its panel labels (which have no title to make way for) is mostly redundant
+    # here and was leaving a band of blank space above panels A/B
+    fig.tight_layout(pad=0.15, w_pad=3.0, h_pad=3.0, rect=[0, 0, 0.995, 0.985])
+
+    for label, ax in zip(["A", "B", "C", "D"], axes.flat):
+        add_panel_label(fig, ax, label)
+
+    fig.savefig(f"{save_dir}/combined-vary-n-and-s-max-load-figure.pdf")
+
+
 # create figures for the default parameter set
 df_default = pd.read_csv("data/s-vs-n-default.csv")
 data_dir_default = "data/default"
@@ -361,3 +399,4 @@ make_combined_figure(df_r1_high, data_dir_r1_high, save_dir_r1_high)
 # 4-panel figure spanning both parameter sets: vary-n-and-s trajectories (top)
 # and percent-of-potential heatmaps (bottom), default vs high r1 rate
 make_combined_n_and_s_percent_figure(df_default, data_dir_default, df_r1_high, data_dir_r1_high, "figures")
+make_combined_n_and_s_load_figure(df_default, data_dir_default, df_r1_high, data_dir_r1_high, "figures")
