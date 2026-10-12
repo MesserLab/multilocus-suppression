@@ -44,7 +44,24 @@ The SLiM file [WF_multilocus_cluster.slim](WF_multilocus_cluster.slim) was used 
 
 ## Data
 
-Data are included as compressed folders of the [data](data) subdirectory. Compressed folders are separated by section of the paper.
+* Data used in the single locus section are included in `data/single-locus.zip`
+* Data used for the (s, n) panel are placed as follows:
+  + Default parameters (50% flat cleavage rate at targets): 
+      * Summary csv: `data/updated-s-vs-n-default.csv`
+      * n = 10 trajectories (s = 0.1, 0.2, 0.3): `data/updated-s-vs-n-n10-trajectories.zip` 
+      * s = 0.3 trajectories (n = 1, 5, 10): `data/updated-s-vs-n-s0.3-trajectories.zip`
+  + r1 fraction of 1/3:
+      * Summary csv: `updated-s-vs-n-r1-high.csv`
+      * n = 10 trajectories (s = 0.1, 0.2, 0.3): `data/updated-s-vs-n-r1-high-n10-trajectories.zip`
+      * s = 0.3 trajectories (n = 1, 5, 10): `data/updated-s-vs-n-r1-high-s0.3-trajectories.zip`
+  + Cas9 saturated:
+      * Summary csv: `updated-s-vs-n-Cas9-saturated.csv`
+      * n = 10 trajectories (s = 0.1, 0.2, 0.3): `data/updated-s-vs-n-Cas9-saturated-n10-trajectories.zip`
+      * s = 0.3 trajectories (n = 1, 5, 10): `data/updated-s-vs-n-Cas9-saturated-s0.3-trajectories.zip`
+  + Cas9 saturated and r1 fraction of 1/3:
+      * Summary csv: `updated-s-vs-n-Cas9-saturated-r1-high.csv`
+      * n = 10 trajectories (s = 0.1, 0.2, 0.3): `data/updated-s-vs-n-Cas9-saturated-r1-high-n10-trajectories.zip`
+      * s = 0.3 trajectories (n = 1, 5, 10): `data/updated-s-vs-n-Cas9-saturated-r1-high-s0.3-trajectories.zip`
 
 ## Figures
 

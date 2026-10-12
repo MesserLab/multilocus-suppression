@@ -127,7 +127,8 @@ palette = c("saddlebrown", "green4", "mediumslateblue") # 1 5 10
 title = TeX(r"($\lambda^* = 0.95$)")
 
 res.no.legend = plot_multilocus_genetic_load_summaries(text_size = text_size, max_gen = max_gen,
-                                             linewidth = linewidth, title = "", legend.pos = "none")
+                                             linewidth = linewidth, title = "", legend.pos = "none",
+                                             alpha.booster = 4) # lines ending at drive fixation are too faint; need to increase alpha some
 
 panelA = res.no.legend$gl.plot 
 panelB = res.no.legend$drive.and.target.plot

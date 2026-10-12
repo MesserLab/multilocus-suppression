@@ -1,27 +1,27 @@
 initialize(){
 	
 	// csv constants	
-	defineCfgParam("make_csv", 0); // whether to create a csv file summarizing each generation
+	defineCfgParam("make_csv", 1); // whether to create a csv file summarizing each generation
 	defineCfgParam("path", paste0(getwd(), "/")); 	// directory for data storage (folder must be created in advance)	
 	
 	// general constants
 	defineCfgParam("population_size", 1e4);
 	defineCfgParam("release_size", 200); // represents a 1% drive allele frequency
-	defineCfgParam("recomb_rate", 0.5); // between target sites only (drive locus is always unlinked)
+	defineCfgParam("recomb_rate", 0.0000001); // between target sites only (drive locus is always unlinked)
 	defineCfgParam("shared_cas9", 0); // whether cas9 is shared between the drive site and target sites
-	defineCfgParam("baseline_cleavage_rate", 0.8); // baseline target site cleavage rate
+	defineCfgParam("baseline_cleavage_rate", 0.5); // baseline target site cleavage rate
 	defineCfgParam("saturation_factor", 0.0); // set to 0.0 for no saturation
 	
 	// constants for the drive locus
-	defineCfgParam("resistance_rate", 0.01);  // functional resistance at drive locus
+	defineCfgParam("resistance_rate", 0.001);  // functional resistance at drive locus
 	defineCfgParam("drive_coeff", 0.1);  // selection coefficient of drive allele
 	defineCfgParam("drive_dom", 0.5);  // dominance of drive allele
 	defineCfgParam("drive_cleavage_rate", 1.0); // drive_cut_rate if shared_cas9 = 0
 	
 	// constants for distant target loci
-	defineCfgParam("num_target_loci", 5);  // either linked or unlinked
+	defineCfgParam("num_target_loci", 10);  // either linked or unlinked
 	defineCfgParam("func_resist_rate", 0.01);  // functional alleles at target loci	
-	defineCfgParam("broken_coeff", 0.43);  // fitness cost of each disrupted target
+	defineCfgParam("broken_coeff", 0.5);  // fitness cost of each disrupted target
 	defineCfgParam("sd_broken_coeff", 0);  // sd of rnorm for fitness cost
 	defineCfgParam("broken_dom", 0);  // dominance of disrupted allele at a target site
 	
@@ -75,7 +75,7 @@ initialize(){
 	// setup the output file
 	if (make_csv){
 		if (num_target_loci > 0){
-			// gen_marker = 1 when it's the generation when the genetic load < 20%
+			// gen_marker = 1 when its the generation when the genetic load < 20%
 			file = "gen_num, mean_fit, genetic_load, wt_rate, drive_rate, resist_rate, wt2_rate, broken_rate, func_rate, gen_marker";
 			
 			// Also record the count of individuals with 0 homz disrupted, 1 homz disrupted,..., all homz disrupted sites
@@ -200,7 +200,7 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 
 
 100: modifyChild(){
-
+	
 	// Determine if parent had drive
 	parent1_wt = sum(parent1.haplosomes.countOfMutationsOfType(m1)) == 1;
 	parent1_d = sum(parent1.haplosomes.countOfMutationsOfType(m2)) == 1;
@@ -280,7 +280,7 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 }
 
 100: fitnessEffect(){
-
+	
 	// first make a fitness placeholder with no effect
 	ind_fitness = 1.0;
 	
@@ -324,7 +324,7 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 }
 
 100 late(){
-	// introduce the gene drive to a random sample of the population in heterozygous state (0.5% frequency)
+	// introduce the gene drive to a random sample of the population in heterozygous state (1% frequency)
 	target = sample(p1.individuals, release_size);
 	mut = target.haploidGenome1.addNewDrawnMutation(m2, 0);
 	defineConstant("DRIVE", mut);
@@ -332,12 +332,14 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 
 
 101: early(){
+
+	gen = sim.cycle - 101; // update 
 	
 	// store the fitness value
-	defineGlobal("fitness", mean(p1.cachedFitness(NULL)));
-	defineGlobal("genetic_load", 1 - fitness);
+	defineGlobal("fitness_value", mean(p1.cachedFitness(NULL)));
+	defineGlobal("genetic_load", 1 - fitness_value);
 	if (make_csv){
-		defineGlobal("new_line", paste(c(sim.cycle - 100, fitness, genetic_load), sep=", "));
+		defineGlobal("new_line", paste(c(gen, fitness_value, genetic_load), sep=", "));
 	}
 	
 	
@@ -347,13 +349,13 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 	gen_marker = 0;
 	if (genetic_load >= recovery_val & !genetic_load_rose_above_val){
 		catn("========================================");
-		catn(paste("genetic_load_above_val_AT_GEN:", sim.cycle - 100));
+		catn(paste("genetic_load_above_val_AT_GEN:", gen));
 		catn("========================================");
 		defineGlobal("genetic_load_rose_above_val", T);
 	}
 	
 	if (genetic_load < recovery_val & genetic_load_rose_above_val & !genetic_load_below_val){
-		defineGlobal("time_to_recovery", sim.cycle - 100);
+		defineGlobal("time_to_recovery", gen);
 		catn("========================================");
 		catn(paste("GENETIC_LOAD_BELOW_VAL_AT_GEN:", time_to_recovery));
 		catn("========================================");
@@ -427,10 +429,10 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 		mean_num_disrupted_on_haplotype = 0;
 	}
 	
-	gen = sim.cycle - 100;
+	//gen = sim.cycle - 101; // update
 	
 	// print summary to console
-	catn(paste("GEN::", gen,"MEAN_FITNESS:", fitness,"DRIVE_RATE:", drive, "WT_AT_DRIVE_RATE:",wild, "R1_AT_DRIVE_RATE:", resist,"DISRUPTED_RATE:", broken, "WT_AT_DISRUPTED_RATE:",wild2,"R1_AT_DISRUPTED_RATE:", func,"GENETIC_LOAD:", genetic_load, "AVG_HOMZ_TARGET_COUNT:", avg_homz_target_count, "AVG_NUM_DISRUPTED_ON_HAPLOSOME:", mean_num_disrupted_on_haplotype));
+	catn(paste("GEN::", gen,"MEAN_FITNESS:", fitness_value,"DRIVE_RATE:", drive, "WT_AT_DRIVE_RATE:",wild, "R1_AT_DRIVE_RATE:", resist,"DISRUPTED_RATE:", broken, "WT_AT_DISRUPTED_RATE:",wild2,"R1_AT_DISRUPTED_RATE:", func,"GENETIC_LOAD:", genetic_load, "AVG_HOMZ_TARGET_COUNT:", avg_homz_target_count, "AVG_NUM_DISRUPTED_ON_HAPLOSOME:", mean_num_disrupted_on_haplotype));
 	
 	
 	if (num_target_loci > 0){
@@ -463,8 +465,22 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 		if (num_target_loci == 0){
 			ind = whichMax(genetic_load_track);
 			max_genetic_load = genetic_load_track[ind];
+			half_genetic_load = 0.5*max_genetic_load; // ADDING HALF LIFE
+			
+			max_gen = size(genetic_load_track);
+			gen_vector_after_max = ind:(max_gen - 1);
+			gl_after_crossed = genetic_load_track[ind:(max_gen-1)];
+			gens_below_half = gen_vector_after_max[which(gl_after_crossed < half_genetic_load)];
+			if (size(gens_below_half)){
+				gen_below_half = gens_below_half[0];
+			} else {
+				gen_below_half = -1; // means never fell below half
+			}
+			
+			
 			catn(paste("ENDING_GENETIC_LOAD:", genetic_load));
 			catn(paste("MAXIMUM_GENETIC_LOAD:", max_genetic_load, "AT_GEN:", ind));
+			catn(paste("HALF_MAXIMUM_GENETIC_LOAD:", half_genetic_load, "AT_GEN:", gen_below_half));
 			sim.simulationFinished();
 		}
 	}
@@ -476,8 +492,22 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 		if (num_target_loci == 0){
 			ind = whichMax(genetic_load_track);
 			max_genetic_load = genetic_load_track[ind];
+			half_genetic_load = 0.5*max_genetic_load; // ADDING HALF LIFE
+			
+			max_gen = size(genetic_load_track);
+			gen_vector_after_max = ind:(max_gen - 1);
+			gl_after_crossed = genetic_load_track[ind:(max_gen-1)];
+			gens_below_half = gen_vector_after_max[which(gl_after_crossed < half_genetic_load)];
+			if (size(gens_below_half)){
+				gen_below_half = gens_below_half[0];
+			} else {
+				gen_below_half = -1; // means never fell below half
+			}
+			
+			
 			catn(paste("ENDING_GENETIC_LOAD:", genetic_load));
 			catn(paste("MAXIMUM_GENETIC_LOAD:", max_genetic_load, "AT_GEN:", ind));
+			catn(paste("HALF_MAXIMUM_GENETIC_LOAD:", half_genetic_load, "AT_GEN:", gen_below_half));
 			sim.simulationFinished();
 		}
 	}
@@ -506,25 +536,50 @@ function (void)reportHaplotypeCounts([integer max_num_report = -1]){
 		catn(paste("BOTH_FIXED_OR_LOST_AT_GEN::", gen, "broken_rate:", broken, "drive_rate:", drive));
 		ind = whichMax(genetic_load_track);
 		max_genetic_load = genetic_load_track[ind];
+		half_genetic_load = 0.5*max_genetic_load; // ADDING HALF LIFE
+		
+		max_gen = size(genetic_load_track);
+		gen_vector_after_max = ind:(max_gen - 1);
+		gl_after_crossed = genetic_load_track[ind:(max_gen-1)];
+		gens_below_half = gen_vector_after_max[which(gl_after_crossed < half_genetic_load)];
+		if (size(gens_below_half)){
+			gen_below_half = gens_below_half[0];
+		} else {
+			gen_below_half = -1; // means never fell below half
+		}
+		
 		catn(paste("ENDING_GENETIC_LOAD:", genetic_load));
 		catn(paste("MAXIMUM_GENETIC_LOAD:", max_genetic_load, "AT_GEN:", ind));
+		catn(paste("HALF_MAXIMUM_GENETIC_LOAD:", half_genetic_load, "AT_GEN", gen_below_half));
+		
 		sim.simulationFinished();
 	}
 
 
 }
 
-
-
-10100 early(){
+10101 early(){
 	
-	// end 10,000 generations after the drive was released if not already stopped
+	// end 500 generations after the drive was released if not already stopped
 	catn("SIMULATION_TIMED_OUT");
 	
 	ind = whichMax(genetic_load_track);
 	max_genetic_load = genetic_load_track[ind];
+	half_genetic_load = 0.5*max_genetic_load; // ADDING HALF LIFE
+	
+	max_gen = size(genetic_load_track);
+	gen_vector_after_max = ind:(max_gen - 1);
+	gl_after_crossed = genetic_load_track[ind:(max_gen-1)];
+	gens_below_half = gen_vector_after_max[which(gl_after_crossed < half_genetic_load)];
+	if (size(gens_below_half)){
+		gen_below_half = gens_below_half[0];
+	} else {
+		gen_below_half = -1; // means never fell below half
+	}
+	
 	catn(paste("ENDING_GENETIC_LOAD:", genetic_load));
 	catn(paste("MAXIMUM_GENETIC_LOAD:", max_genetic_load, "AT_GEN:", ind));
+	catn(paste("HALF_MAXIMUM_GENETIC_LOAD:", half_genetic_load, "AT_GEN:", gen_below_half));
 	
 	sim.simulationFinished();
 }
