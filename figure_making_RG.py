@@ -1,8 +1,11 @@
 import glob
 import os
+import re
+import zipfile
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 from matplotlib.lines import Line2D
 import seaborn as sns
 
@@ -83,29 +86,27 @@ def plot_max_load_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15):
     ax.grid(False)
 
 
-def make_max_load_heatmap(df, save_dir):
-    fig, ax = plt.subplots(figsize=(6.5, 5))
-    plot_max_load_heatmap(ax, df)
-    fig.tight_layout()
-    fig.savefig(f"{save_dir}/s-vs-n-max-load-heatmap.png", dpi=450)
-
-
-def plot_recovery_time_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15):
+def plot_half_max_time_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15, gamma=0.4):
     pivot = df.pivot(index="target_fitness_cost", columns="num_targets",
-        values="avg_time_to_genetic_load_below_marker")
+        values="avg_time_to_below_half_max_genetic_load")
     n_vals = pivot.columns.values.astype(float)
     s_vals = pivot.index.values.astype(float)
     n_edges, s_edges = make_grid_edges(n_vals, s_vals)
 
-    # -1 marks parameter combos that theoretically never recover (genetic load
-    # never falls back below the marker) -- mask these out to light gray
+    # -1 marks parameter combos that never fall below half max -- mask these out
     plot_values = np.where(pivot.values == -1, np.nan, pivot.values)
-    cmap = plt.get_cmap("viridis").copy()
+
+    # most cells fall well under 40 generations, but a handful run past 100 and
+    # would otherwise compress everything else into near-black. rather than
+    # changing the (linear, full-range) scale itself, resample magma so more of
+    # its colors are spent at the low end: gamma < 1 packs colors toward small
+    # values, gamma = 1 is plain magma
+    cmap = ListedColormap(plt.get_cmap("magma")(np.linspace(0, 1, 256) ** gamma))
     cmap.set_bad("#DCDCDC")
 
     mesh = ax.pcolormesh(n_edges, s_edges, plot_values, cmap=cmap, shading="flat")
     cbar = ax.figure.colorbar(mesh, ax=ax, shrink=0.7, pad=cbar_pad, fraction=cbar_fraction)
-    cbar.ax.set_title("Avg time\nto recover", fontsize=10, pad=10)
+    cbar.ax.set_title("Avg time\nto half max", fontsize=10, pad=10)
 
     ax.set_xticks(n_vals)
     ax.set_yticks(s_vals[::2])
@@ -114,11 +115,25 @@ def plot_recovery_time_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15):
     ax.grid(False)
 
 
-def make_recovery_time_heatmap(df, save_dir):
-    fig, ax = plt.subplots(figsize=(6.5, 5))
-    plot_recovery_time_heatmap(ax, df)
-    fig.tight_layout()
-    fig.savefig(f"{save_dir}/s-vs-n-time-to-recover-heatmap.png", dpi=450)
+def find_replicate_csvs(data_dir, n, s):
+    # replicate CSVs live inside zips whose folder names encode the parameters,
+    # either as "-n10-s0.25-trajectories/" or as a parent/child pair like
+    # "-n10-trajectories/s0.1/" -- pull n and s out of each member's folder path
+    # (anchored on - or / so the "s-vs-n" prefix and "saturated" don't match)
+    matches = []
+    for zip_path in sorted(glob.glob(os.path.join(data_dir, "*.zip"))):
+        with zipfile.ZipFile(zip_path) as zf:
+            for member in zf.namelist():
+                if not member.endswith(".csv") or "__MACOSX" in member:
+                    continue
+                folder = os.path.dirname(member)
+                n_match = re.findall(r"(?:^|[-/])n(\d+)(?=[-/]|$)", folder)
+                s_match = re.findall(r"(?:^|[-/])s(\d*\.?\d+)(?=[-/]|$)", folder)
+                if n_match and s_match and int(n_match[-1]) == n and float(s_match[-1]) == s:
+                    matches.append((zip_path, member))
+    if not matches:
+        raise FileNotFoundError(f"no replicate CSVs for n={n}, s={s} in {data_dir}")
+    return matches
 
 
 def load_avg_trajectory(data_dir, n, s):
@@ -126,16 +141,16 @@ def load_avg_trajectory(data_dir, n, s):
     # so its final genetic load holds steady for any generation beyond that --
     # forward-fill each replicate out to the longest-running replicate before
     # averaging, rather than letting the average silently drop replicates
-    folder = os.path.join(data_dir, f"s{s}_n{n}")
-    rep_files = sorted(glob.glob(os.path.join(folder, "*.csv")))
-
     reps = []
-    for rep_file in rep_files:
-        rep_df = pd.read_csv(rep_file, skipinitialspace=True)
+    for zip_path, member in find_replicate_csvs(data_dir, n, s):
+        with zipfile.ZipFile(zip_path) as zf, zf.open(member) as f:
+            rep_df = pd.read_csv(f, skipinitialspace=True)
+        rep_df["gen_num"] = rep_df["gen_num"].astype(int)
         reps.append(rep_df.set_index("gen_num")["genetic_load"])
 
+    min_gen = int(min(rep.index.min() for rep in reps))
     max_gen = int(max(rep.index.max() for rep in reps))
-    full_index = np.arange(1, max_gen + 1)
+    full_index = np.arange(min_gen, max_gen + 1)
     reps = [rep.reindex(full_index).ffill() for rep in reps]
 
     return pd.concat(reps, axis=1).mean(axis=1)
@@ -189,76 +204,6 @@ def add_side_trajectory_legends(ax, colors, value_labels, fixed_label=None, insi
     ax.legend(style_handles, style_labels, loc=loc, bbox_to_anchor=(anchor_x, style_y), frameon=True, framealpha=1.0)
 
 
-def make_vary_n_fixed_s_trajectories(df, data_dir, save_dir):
-    n_vals = [1, 5, 10]
-    s = 0.3
-    colors = ["#2a78d6", "#1baf7a", "#eda100"]
-
-    fig, ax = plt.subplots(figsize=(7.5, 5))
-    plot_trajectory_lines(ax, df, data_dir, [(n, s) for n in n_vals], colors)
-    add_side_trajectory_legends(ax, colors, [f"n = {n}" for n in n_vals], f"s = {s}")
-
-    fig.tight_layout()
-    fig.subplots_adjust(right=0.78)
-    fig.savefig(f"{save_dir}/vary-n-fixed-s-trajectories.png", dpi=450)
-
-
-def make_vary_s_fixed_n_trajectories(df, data_dir, save_dir):
-    n = 10
-    s_vals = [0.1, 0.2, 0.3]
-    colors = ["#2a78d6", "#1baf7a", "#eda100"]
-
-    fig, ax = plt.subplots(figsize=(7.5, 5))
-    plot_trajectory_lines(ax, df, data_dir, [(n, s) for s in s_vals], colors)
-    add_side_trajectory_legends(ax, colors, [f"s = {s}" for s in s_vals], f"n = {n}")
-
-    fig.tight_layout()
-    fig.subplots_adjust(right=0.78)
-    fig.savefig(f"{save_dir}/vary-s-fixed-n-trajectories.png", dpi=450)
-
-
-def make_vary_n_and_s_trajectories(df, data_dir, save_dir):
-    param_combos = [(10, 0.25), (1, 0.95)]
-    colors = ["#2a78d6", "#eda100"]
-
-    fig, ax = plt.subplots(figsize=(7.5, 5))
-    plot_trajectory_lines(ax, df, data_dir, param_combos, colors)
-    value_labels = [f"n = {n}\ns = {s}" for n, s in param_combos]
-    add_side_trajectory_legends(ax, colors, value_labels)
-
-    fig.tight_layout()
-    fig.subplots_adjust(right=0.78)
-    fig.savefig(f"{save_dir}/vary-n-and-s-trajectories.png", dpi=450)
-
-
-def plot_percent_of_potential_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15):
-    # percent of the theoretical maximum genetic load actually realized
-    # (avg_max_load / theoretical_potential_load), already precomputed as
-    # fraction_of_max_load_attained -- pinning color scale to 0-1 across both
-    # parameter sets keeps panels comparable even though their data ranges differ
-    pivot = df.pivot(index="target_fitness_cost", columns="num_targets", values="fraction_of_max_load_attained")
-    n_vals = pivot.columns.values.astype(float)
-    s_vals = pivot.index.values.astype(float)
-    n_edges, s_edges = make_grid_edges(n_vals, s_vals)
-
-    mesh = ax.pcolormesh(n_edges, s_edges, pivot.values, cmap="viridis", vmin=0, vmax=1, shading="flat")
-    cbar = ax.figure.colorbar(mesh, ax=ax, shrink=0.7, pad=cbar_pad, fraction=cbar_fraction)
-    cbar.ax.set_title(r"$\frac{\text{realized}}{\text{potential}}$", fontsize=14, pad=16)
-
-    ax.set_xticks(n_vals)
-    ax.set_yticks(s_vals[::2])
-    ax.set_xlabel("Number of target sites (n)")
-    ax.set_ylabel("Disrupted target site fitness cost (s)")
-    ax.grid(False)
-
-
-def make_percent_of_potential_heatmap(df, save_dir):
-    fig, ax = plt.subplots(figsize=(6.5, 5))
-    plot_percent_of_potential_heatmap(ax, df)
-    fig.tight_layout()
-    fig.savefig(f"{save_dir}/s-vs-n-percent-of-potential-heatmap.png", dpi=450)
-
-
 def make_combined_figure(df, data_dir, save_dir):
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     colors = ["#2a78d6", "#1baf7a", "#eda100"]
@@ -268,7 +213,7 @@ def make_combined_figure(df, data_dir, save_dir):
     # touch C/D since they have no colorbar, and doesn't touch tight_layout's
     # own spacing since that's set by the pad= below, unchanged
     plot_max_load_heatmap(axes[0, 0], df, cbar_fraction=0.1)
-    plot_recovery_time_heatmap(axes[0, 1], df, cbar_fraction=0.1)
+    plot_half_max_time_heatmap(axes[0, 1], df, cbar_fraction=0.1)
 
     plot_trajectory_lines(axes[1, 0], df, data_dir, [(1, 0.3), (5, 0.3), (10, 0.3)], colors)
     add_side_trajectory_legends(axes[1, 0], colors, ["n = 1", "n = 5", "n = 10"], "s = 0.3", inside=True)
@@ -292,111 +237,50 @@ def make_combined_figure(df, data_dir, save_dir):
     fig.savefig(f"{save_dir}/combined-figure.pdf")
 
 
-def make_combined_n_and_s_percent_figure(df_default, data_dir_default, df_r1_high, data_dir_r1_high, save_dir):
-    # spans both parameter sets side by side (default in column 0, high r1 rate
-    # in column 1), so unlike make_combined_figure it can't be driven by a single
-    # df/data_dir pair
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+def make_combined_n_and_s_figure(df_low, data_dir_low, df_high, data_dir_high, save_path):
+    # spans two parameter sets side by side (r1 rate = 0.01 in column 0, high r1
+    # rate in column 1), so unlike make_combined_figure it can't be driven by a
+    # single df/data_dir pair
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     colors = ["#2a78d6", "#eda100"]
     param_combos = [(10, 0.25), (1, 0.95)]
     value_labels = [f"n = {n}\ns = {s}" for n, s in param_combos]
 
-    plot_trajectory_lines(axes[0, 0], df_default, data_dir_default, param_combos, colors)
-    add_side_trajectory_legends(axes[0, 0], colors, value_labels, inside=True)
+    for ax, df, data_dir, title in zip(axes, [df_low, df_high], [data_dir_low, data_dir_high],
+            ["r1 rate = 0.01", "r1 rate = 1/3"]):
+        plot_trajectory_lines(ax, df, data_dir, param_combos, colors)
+        add_side_trajectory_legends(ax, colors, value_labels, inside=True)
+        ax.set_title(title)
 
-    plot_trajectory_lines(axes[0, 1], df_r1_high, data_dir_r1_high, param_combos, colors)
-    add_side_trajectory_legends(axes[0, 1], colors, value_labels, inside=True)
+    # left=0.02 leaves room for panel label A, which sits a fixed 0.5 in left of
+    # its axes and otherwise gets clipped at the figure's left edge
+    fig.tight_layout(pad=0.15, w_pad=3.0, rect=[0.02, 0, 0.995, 0.97])
 
-    plot_percent_of_potential_heatmap(axes[1, 0], df_default, cbar_fraction=0.1)
-    plot_percent_of_potential_heatmap(axes[1, 1], df_r1_high, cbar_fraction=0.1)
-
-    # titled on both rows, not just the top -- a title on row 0 alone reads as
-    # describing only that panel, not the whole column beneath it
-    for ax in axes[:, 0]:
-        ax.set_title("r1 rate = 0.01")
-    for ax in axes[:, 1]:
-        ax.set_title("r1 rate = 1/3")
-
-    # top=0.985 (vs. the plain make_combined_figure's 0.965): tight_layout already
-    # reserves room for the per-axes titles above row 0 as part of laying out the
-    # axes themselves, so the extra top margin that make_combined_figure needs for
-    # its panel labels (which have no title to make way for) is mostly redundant
-    # here and was leaving a band of blank space above panels A/B
-    fig.tight_layout(pad=0.15, w_pad=3.0, h_pad=3.0, rect=[0, 0, 0.995, 0.985])
-
-    for label, ax in zip(["A", "B", "C", "D"], axes.flat):
+    for label, ax in zip(["A", "B"], axes):
         add_panel_label(fig, ax, label)
 
-    fig.savefig(f"{save_dir}/combined-vary-n-and-s-percent-of-potential-figure.pdf")
+    fig.savefig(save_path)
 
 
-def make_combined_n_and_s_load_figure(df_default, data_dir_default, df_r1_high, data_dir_r1_high, save_dir):
-    # spans both parameter sets side by side (default in column 0, high r1 rate
-    # in column 1), so unlike make_combined_figure it can't be driven by a single
-    # df/data_dir pair
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    colors = ["#2a78d6", "#eda100"]
-    param_combos = [(10, 0.25), (1, 0.95)]
-    value_labels = [f"n = {n}\ns = {s}" for n, s in param_combos]
+# summary csv for each parameter set -- the key doubles as both the folder under
+# data/ holding its trajectory zips and the folder under figures/ to save into
+datasets = {
+    "default": "data/default/updated-s-vs-n-default.csv",
+    "r1-high": "data/r1-high/updated-s-vs-n-r1-high.csv",
+    "Cas9-default": "data/Cas9-default/updated-s-vs-n-Cas9-saturated.csv",
+    "Cas9-r1-high": "data/Cas9-r1-high/updated-s-vs-n-Cas9-saturated-r1-high.csv",
+}
 
-    plot_trajectory_lines(axes[0, 0], df_default, data_dir_default, param_combos, colors)
-    add_side_trajectory_legends(axes[0, 0], colors, value_labels, inside=True)
-
-    plot_trajectory_lines(axes[0, 1], df_r1_high, data_dir_r1_high, param_combos, colors)
-    add_side_trajectory_legends(axes[0, 1], colors, value_labels, inside=True)
-
-    plot_max_load_heatmap(axes[1, 0], df_default, cbar_fraction=0.1)
-    plot_max_load_heatmap(axes[1, 1], df_r1_high, cbar_fraction=0.1)
-
-    # titled on both rows, not just the top -- a title on row 0 alone reads as
-    # describing only that panel, not the whole column beneath it
-    for ax in axes[:, 0]:
-        ax.set_title("r1 rate = 0.01")
-    for ax in axes[:, 1]:
-        ax.set_title("r1 rate = 1/3")
-
-    # top=0.985 (vs. the plain make_combined_figure's 0.965): tight_layout already
-    # reserves room for the per-axes titles above row 0 as part of laying out the
-    # axes themselves, so the extra top margin that make_combined_figure needs for
-    # its panel labels (which have no title to make way for) is mostly redundant
-    # here and was leaving a band of blank space above panels A/B
-    fig.tight_layout(pad=0.15, w_pad=3.0, h_pad=3.0, rect=[0, 0, 0.995, 0.985])
-
-    for label, ax in zip(["A", "B", "C", "D"], axes.flat):
-        add_panel_label(fig, ax, label)
-
-    fig.savefig(f"{save_dir}/combined-vary-n-and-s-max-load-figure.pdf")
+dfs = {}
+for name, csv_path in datasets.items():
+    dfs[name] = pd.read_csv(csv_path)
+    save_dir = f"figures/{name}"
+    os.makedirs(save_dir, exist_ok=True)
+    make_combined_figure(dfs[name], f"data/{name}", save_dir)
 
 
-# create figures for the default parameter set
-df_default = pd.read_csv("data/s-vs-n-default.csv")
-data_dir_default = "data/default"
-save_dir_default = "figures/default"
-
-make_max_load_heatmap(df_default, save_dir_default)
-make_recovery_time_heatmap(df_default, save_dir_default)
-make_vary_n_fixed_s_trajectories(df_default, data_dir_default, save_dir_default)
-make_vary_s_fixed_n_trajectories(df_default, data_dir_default, save_dir_default)
-make_vary_n_and_s_trajectories(df_default, data_dir_default, save_dir_default)
-make_percent_of_potential_heatmap(df_default, save_dir_default)
-make_combined_figure(df_default, data_dir_default, save_dir_default)
-
-
-# repeat for high r1 rate
-df_r1_high = pd.read_csv("data/s-vs-n-r1-high.csv")
-data_dir_r1_high = "data/r1-high"
-save_dir_r1_high = "figures/r1-high"
-
-make_max_load_heatmap(df_r1_high, save_dir_r1_high)
-make_recovery_time_heatmap(df_r1_high, save_dir_r1_high)
-make_vary_n_fixed_s_trajectories(df_r1_high, data_dir_r1_high, save_dir_r1_high)
-make_vary_s_fixed_n_trajectories(df_r1_high, data_dir_r1_high, save_dir_r1_high)
-make_vary_n_and_s_trajectories(df_r1_high, data_dir_r1_high, save_dir_r1_high)
-make_percent_of_potential_heatmap(df_r1_high, save_dir_r1_high)
-make_combined_figure(df_r1_high, data_dir_r1_high, save_dir_r1_high)
-
-
-# 4-panel figure spanning both parameter sets: vary-n-and-s trajectories (top)
-# and percent-of-potential heatmaps (bottom), default vs high r1 rate
-make_combined_n_and_s_percent_figure(df_default, data_dir_default, df_r1_high, data_dir_r1_high, "figures")
-make_combined_n_and_s_load_figure(df_default, data_dir_default, df_r1_high, data_dir_r1_high, "figures")
+# 2-panel figures spanning both r1 rates: vary-n-and-s trajectories, low vs high r1 rate
+make_combined_n_and_s_figure(dfs["default"], "data/default", dfs["r1-high"], "data/r1-high",
+    "figures/combined-vary-n-and-s-trajectories.pdf")
+make_combined_n_and_s_figure(dfs["Cas9-default"], "data/Cas9-default", dfs["Cas9-r1-high"], "data/Cas9-r1-high",
+    "figures/combined-vary-n-and-s-trajectories-Cas9.pdf")
