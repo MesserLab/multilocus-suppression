@@ -86,7 +86,7 @@ def plot_max_load_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15):
     ax.grid(False)
 
 
-def plot_half_max_time_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15, gamma=0.4):
+def plot_half_max_time_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15, gamma=0.5):
     pivot = df.pivot(index="target_fitness_cost", columns="num_targets",
         values="avg_time_to_below_half_max_genetic_load")
     n_vals = pivot.columns.values.astype(float)
@@ -106,7 +106,7 @@ def plot_half_max_time_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15, gamma=
 
     mesh = ax.pcolormesh(n_edges, s_edges, plot_values, cmap=cmap, shading="flat")
     cbar = ax.figure.colorbar(mesh, ax=ax, shrink=0.7, pad=cbar_pad, fraction=cbar_fraction)
-    cbar.ax.set_title("Avg time\nto half max", fontsize=10, pad=10)
+    cbar.ax.set_title("Avg time to\nhalf max load", fontsize=10, pad=10)
 
     ax.set_xticks(n_vals)
     ax.set_yticks(s_vals[::2])
