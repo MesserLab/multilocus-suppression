@@ -71,6 +71,12 @@ The SLiM file [WF_multilocus_cluster.slim](WF_multilocus_cluster.slim) was used 
       * n = 10, s = 0.25 trajectories: `data/updated-s-vs-n-Cas9-saturated-r1-high-n10-s0.25-trajectories.zip`
       * n = 1, s = 0.95 trajectories: `data/updated-s-vs-n-Cas9-saturated-r1-high-n1-s0.95-trajectories.zip`
 
+* Data used for the varied recombination rates (s,n) heatmaps are placed as follows:
+  + Recombination rate = 10^-7: `data/recomb10_7-s-vs-n.csv`
+  + Recombination rate = 10^-5: `data/recomb10_5-s-vs-n.csv`
+  + Recombination rate = 10^-4: `data/recomb10_4-s-vs-n.csv`
+  + Recombination rate = 0.5: `data/updated-s-vs-n-default.csv`
+
 ## Figures
 
 [figure-making.Rmd](figure-making.Rmd) shows how each plot in the paper was made. 
