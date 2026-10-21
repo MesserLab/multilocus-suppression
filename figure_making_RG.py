@@ -1,6 +1,7 @@
 import glob
 import os
 import re
+import string
 import zipfile
 import pandas as pd
 import numpy as np
@@ -40,15 +41,23 @@ def make_grid_edges(n_vals, s_vals):
     return n_edges, s_edges
 
 
-def plot_max_load_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15):
+MAX_LOAD_CBAR_LABEL = "Avg max\ngenetic load"
+HALF_MAX_CBAR_LABEL = "Avg time to\nhalf max load"
+
+
+def plot_max_load_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15, cbar=True):
+    # cbar=False skips the per-axes colorbar -- for panels sharing one colorbar
+    # that the caller draws from the returned mesh (the 0-1 range is already
+    # fixed, so every panel maps load to color identically)
     pivot = df.pivot(index="target_fitness_cost", columns="num_targets", values="avg_max_load")
     n_vals = pivot.columns.values.astype(float)
     s_vals = pivot.index.values.astype(float)
     n_edges, s_edges = make_grid_edges(n_vals, s_vals)
 
     mesh = ax.pcolormesh(n_edges, s_edges, pivot.values, cmap="viridis", vmin=0, vmax=1, shading="flat")
-    cbar = ax.figure.colorbar(mesh, ax=ax, shrink=0.7, pad=cbar_pad, fraction=cbar_fraction)
-    cbar.ax.set_title("Avg max\ngenetic load", fontsize=10, pad=10)
+    if cbar:
+        cb = ax.figure.colorbar(mesh, ax=ax, shrink=0.7, pad=cbar_pad, fraction=cbar_fraction)
+        cb.ax.set_title(MAX_LOAD_CBAR_LABEL, fontsize=10, pad=10)
 
     # theoretical maximum load, evaluated on a fine grid for smooth contour lines
     n_fine = np.linspace(n_vals.min(), n_vals.max(), 400)
@@ -84,9 +93,13 @@ def plot_max_load_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15):
     ax.set_xlabel("Number of target sites (n)")
     ax.set_ylabel("Disrupted target site fitness cost (s)")
     ax.grid(False)
+    return mesh
 
 
-def plot_half_max_time_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15, gamma=0.5):
+def plot_half_max_time_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15, gamma=0.5, vmin=None, vmax=None,
+        cbar=True):
+    # vmin/vmax default to this df's own range; pass them explicitly (along with
+    # cbar=False, as in plot_max_load_heatmap) for panels sharing one color scale
     pivot = df.pivot(index="target_fitness_cost", columns="num_targets",
         values="avg_time_to_below_half_max_genetic_load")
     n_vals = pivot.columns.values.astype(float)
@@ -104,15 +117,17 @@ def plot_half_max_time_heatmap(ax, df, cbar_pad=0.08, cbar_fraction=0.15, gamma=
     cmap = ListedColormap(plt.get_cmap("magma")(np.linspace(0, 1, 256) ** gamma))
     cmap.set_bad("#DCDCDC")
 
-    mesh = ax.pcolormesh(n_edges, s_edges, plot_values, cmap=cmap, shading="flat")
-    cbar = ax.figure.colorbar(mesh, ax=ax, shrink=0.7, pad=cbar_pad, fraction=cbar_fraction)
-    cbar.ax.set_title("Avg time to\nhalf max load", fontsize=10, pad=10)
+    mesh = ax.pcolormesh(n_edges, s_edges, plot_values, cmap=cmap, vmin=vmin, vmax=vmax, shading="flat")
+    if cbar:
+        cb = ax.figure.colorbar(mesh, ax=ax, shrink=0.7, pad=cbar_pad, fraction=cbar_fraction)
+        cb.ax.set_title(HALF_MAX_CBAR_LABEL, fontsize=10, pad=10)
 
     ax.set_xticks(n_vals)
     ax.set_yticks(s_vals[::2])
     ax.set_xlabel("Number of target sites (n)")
     ax.set_ylabel("Disrupted target site fitness cost (s)")
     ax.grid(False)
+    return mesh
 
 
 def find_replicate_csvs(data_dir, n, s):
@@ -262,6 +277,47 @@ def make_combined_n_and_s_figure(df_low, data_dir_low, df_high, data_dir_high, s
     fig.savefig(save_path)
 
 
+def make_recombination_heatmap_figure(recomb_dfs, save_path):
+    # recomb_dfs: list of (row title, df) pairs, one row per recombination rate
+    # (top to bottom). max load in the left column, time to half max in the right,
+    # each column with one horizontal colorbar underneath
+    fig, axes = plt.subplots(len(recomb_dfs), 2, figsize=(10, 5 * len(recomb_dfs) + 0.3), layout="constrained")
+    # rect leaves a margin on the left and top for the panel labels, which sit a
+    # fixed offset outside each axes and aren't accounted for by the layout itself
+    fig.get_layout_engine().set(rect=(0.02, 0, 0.98, 0.99), h_pad=0.15, w_pad=0.15)
+
+    # one colorbar per column shared by all rows, so a color means the same value
+    # in every row -- time to half max needs a shared vmin/vmax for that, since
+    # its range grows a lot as recombination drops (max load is already fixed 0-1)
+    half_times = pd.concat([df["avg_time_to_below_half_max_genetic_load"] for _, df in recomb_dfs])
+    half_times = half_times[half_times != -1]
+
+    for row, (title, df) in enumerate(recomb_dfs):
+        load_mesh = plot_max_load_heatmap(axes[row, 0], df, cbar=False)
+        half_mesh = plot_half_max_time_heatmap(axes[row, 1], df, vmin=half_times.min(), vmax=half_times.max(),
+            cbar=False)
+        for ax in axes[row]:
+            ax.set_title(title)
+            # square plotting area regardless of figsize -- figsize above is just
+            # tuned so the square panels fill the page without leftover whitespace
+            ax.set_box_aspect(1)
+
+    # pad is a fraction of the whole column's height (all rows), so the default
+    # 0.05 leaves a wide gap under the bottom row -- keep it small
+    for col, mesh, label in [(0, load_mesh, MAX_LOAD_CBAR_LABEL), (1, half_mesh, HALF_MAX_CBAR_LABEL)]:
+        cb = fig.colorbar(mesh, ax=axes[:, col], location="bottom", shrink=0.8, fraction=0.025, aspect=40,
+            pad=0.015)
+        cb.set_label(label.replace("\n", " "))
+
+    # constrained layout only settles axes positions at draw time, so draw once
+    # before reading them for the panel labels
+    fig.canvas.draw()
+    for label, ax in zip(string.ascii_uppercase, axes.flat):
+        add_panel_label(fig, ax, label)
+
+    fig.savefig(save_path)
+
+
 # summary csv for each parameter set -- the key doubles as both the folder under
 # data/ holding its trajectory zips and the folder under figures/ to save into
 datasets = {
@@ -284,3 +340,22 @@ make_combined_n_and_s_figure(dfs["default"], "data/default", dfs["r1-high"], "da
     "figures/combined-vary-n-and-s-trajectories.pdf")
 make_combined_n_and_s_figure(dfs["Cas9-default"], "data/Cas9-default", dfs["Cas9-r1-high"], "data/Cas9-r1-high",
     "figures/combined-vary-n-and-s-trajectories-Cas9.pdf")
+
+
+# heatmap figures across recombination rates, one row per rate from unlinked
+# (top) down to the lowest rate (bottom)
+recomb_rows = {
+    "0.5": ("Recombination rate = 0.5", dfs["default"]),
+    **{exp: (f"Recombination rate = $10^{{-{exp}}}$", pd.read_csv(f"data/recomb10_{exp}-s-vs-n.csv"))
+        for exp in ["4", "5", "7"]},
+}
+
+# 3x2: unlinked, a middle rate, and the lowest rate -- compare 10^-4 vs 10^-5;
+# each gets its own output file
+for middle_rate in ["4", "5"]:
+    make_recombination_heatmap_figure([recomb_rows[r] for r in ["0.5", middle_rate, "7"]],
+        f"figures/recombination-heatmaps-1e-{middle_rate}.pdf")
+
+# 4x2: all four rates
+make_recombination_heatmap_figure([recomb_rows[r] for r in ["0.5", "4", "5", "7"]],
+    "figures/recombination-heatmaps-all.pdf")
