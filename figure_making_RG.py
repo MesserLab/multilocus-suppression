@@ -327,19 +327,19 @@ datasets = {
     "Cas9-r1-high": "data/Cas9-r1-high/updated-s-vs-n-Cas9-saturated-r1-high.csv",
 }
 
-dfs = {}
-for name, csv_path in datasets.items():
-    dfs[name] = pd.read_csv(csv_path)
-    save_dir = f"figures/{name}"
-    os.makedirs(save_dir, exist_ok=True)
-    make_combined_figure(dfs[name], f"data/{name}", save_dir)
+# dfs = {}
+# for name, csv_path in datasets.items():
+#     dfs[name] = pd.read_csv(csv_path)
+#     save_dir = f"figures/{name}"
+#     os.makedirs(save_dir, exist_ok=True)
+#     make_combined_figure(dfs[name], f"data/{name}", save_dir)
 
 
-# 2-panel figures spanning both r1 rates: vary-n-and-s trajectories, low vs high r1 rate
-make_combined_n_and_s_figure(dfs["default"], "data/default", dfs["r1-high"], "data/r1-high",
-    "figures/combined-vary-n-and-s-trajectories.pdf")
-make_combined_n_and_s_figure(dfs["Cas9-default"], "data/Cas9-default", dfs["Cas9-r1-high"], "data/Cas9-r1-high",
-    "figures/combined-vary-n-and-s-trajectories-Cas9.pdf")
+# # 2-panel figures spanning both r1 rates: vary-n-and-s trajectories, low vs high r1 rate
+# make_combined_n_and_s_figure(dfs["default"], "data/default", dfs["r1-high"], "data/r1-high",
+#     "figures/combined-vary-n-and-s-trajectories.pdf")
+# make_combined_n_and_s_figure(dfs["Cas9-default"], "data/Cas9-default", dfs["Cas9-r1-high"], "data/Cas9-r1-high",
+#     "figures/combined-vary-n-and-s-trajectories-Cas9.pdf")
 
 
 # heatmap figures across recombination rates, one row per rate from unlinked
