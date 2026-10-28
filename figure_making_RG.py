@@ -278,13 +278,14 @@ def make_combined_n_and_s_figure(df_low, data_dir_low, df_high, data_dir_high, s
 
 
 def make_recombination_heatmap_figure(recomb_dfs, save_path):
-    # recomb_dfs: list of (row title, df) pairs, one row per recombination rate
+    # recomb_dfs: list of (row label, df) pairs, one row per recombination rate
     # (top to bottom). max load in the left column, time to half max in the right,
     # each column with one horizontal colorbar underneath
-    fig, axes = plt.subplots(len(recomb_dfs), 2, figsize=(10, 5 * len(recomb_dfs) + 0.3), layout="constrained")
-    # rect leaves a margin on the left and top for the panel labels, which sit a
-    # fixed offset outside each axes and aren't accounted for by the layout itself
-    fig.get_layout_engine().set(rect=(0.02, 0, 0.98, 0.99), h_pad=0.15, w_pad=0.15)
+    fig, axes = plt.subplots(len(recomb_dfs), 2, figsize=(11, 4.75 * len(recomb_dfs) + 0.4), layout="constrained")
+    # rect leaves a margin on the left for the row labels and on the left/top for
+    # the panel labels, which all sit a fixed offset outside the axes and aren't
+    # accounted for by the layout itself
+    fig.get_layout_engine().set(rect=(0.07, 0, 0.98, 0.975), h_pad=0.15, w_pad=0.15)
 
     # one colorbar per column shared by all rows, so a color means the same value
     # in every row -- time to half max needs a shared vmin/vmax for that, since
@@ -292,26 +293,135 @@ def make_recombination_heatmap_figure(recomb_dfs, save_path):
     half_times = pd.concat([df["avg_time_to_below_half_max_genetic_load"] for _, df in recomb_dfs])
     half_times = half_times[half_times != -1]
 
-    for row, (title, df) in enumerate(recomb_dfs):
+    for row, (_, df) in enumerate(recomb_dfs):
         load_mesh = plot_max_load_heatmap(axes[row, 0], df, cbar=False)
         half_mesh = plot_half_max_time_heatmap(axes[row, 1], df, vmin=half_times.min(), vmax=half_times.max(),
             cbar=False)
         for ax in axes[row]:
-            ax.set_title(title)
             # square plotting area regardless of figsize -- figsize above is just
             # tuned so the square panels fill the page without leftover whitespace
             ax.set_box_aspect(1)
 
     # pad is a fraction of the whole column's height (all rows), so the default
     # 0.05 leaves a wide gap under the bottom row -- keep it small
+    cbar_axes = []
     for col, mesh, label in [(0, load_mesh, MAX_LOAD_CBAR_LABEL), (1, half_mesh, HALF_MAX_CBAR_LABEL)]:
-        cb = fig.colorbar(mesh, ax=axes[:, col], location="bottom", shrink=0.8, fraction=0.025, aspect=40,
+        cb = fig.colorbar(mesh, ax=axes[:, col], location="bottom", shrink=0.65, fraction=0.025, aspect=40,
             pad=0.015)
         cb.set_label(label.replace("\n", " "))
+        cbar_axes.append(cb.ax)
 
-    # constrained layout only settles axes positions at draw time, so draw once
-    # before reading them for the panel labels
+    # constrained layout only settles axes positions at draw time, so draw once,
+    # then freeze it -- with square panels it spreads any spare width evenly
+    # between and around the columns, leaving a wide gap down the middle, so
+    # slide each column (and its colorbar) inward until the gap between the left
+    # column's right edge and the right column's y-axis label is col_gap_in
     fig.canvas.draw()
+    fig.set_layout_engine("none")
+    col_gap_in = 0.3
+    renderer = fig.canvas.get_renderer()
+    right_col_left = min(ax.get_tightbbox(renderer).x0 for ax in axes[:, 1]) / fig.dpi
+    shift = (right_col_left - axes[0, 0].get_position().x1 * fig.get_figwidth() - col_gap_in) / 2
+    shift /= fig.get_figwidth()
+    for col, sign in [(0, 1), (1, -1)]:
+        for ax in [*axes[:, col], cbar_axes[col]]:
+            pos = ax.get_position()
+            ax.set_position([pos.x0 + sign * shift, pos.y0, pos.width, pos.height])
+
+    for label, ax in zip(string.ascii_uppercase, axes.flat):
+        add_panel_label(fig, ax, label)
+
+    # the recombination rate is shared across each row, so label it once on the
+    # left (rotated, centered on the row) instead of titling every panel -- a
+    # fixed inch offset left of the axes clears the y-axis label and tick labels
+    for (row_label, _), ax in zip(recomb_dfs, axes[:, 0]):
+        pos = ax.get_position()
+        fig.text(pos.x0 - 1 / fig.get_figwidth(), (pos.y0 + pos.y1) / 2, row_label, rotation=90,
+            fontsize=16, ha="center", va="center")
+
+    # sliding the columns inward leaves the spare width at the outer edges --
+    # a tight bounding box trims that down to an even pad_inches border all round
+    fig.savefig(save_path, bbox_inches="tight", pad_inches=0.15)
+
+
+def load_single_locus_replicates(zip_path, drive_folder, res_folder):
+    # every replicate CSV under <drive_folder>/<res_folder>/ in the zip -- some
+    # combos are further split into fixed/ and lost/ subfolders (by whether the
+    # drive fixed or was lost), so match on the path prefix to pick up both
+    prefix = f"/{drive_folder}/{res_folder}/"
+    reps = []
+    with zipfile.ZipFile(zip_path) as zf:
+        for member in zf.namelist():
+            if member.endswith(".csv") and "__MACOSX" not in member and prefix in f"/{member}":
+                with zf.open(member) as f:
+                    reps.append(pd.read_csv(f, skipinitialspace=True))
+    if not reps:
+        raise FileNotFoundError(f"no replicate CSVs under {prefix} in {zip_path}")
+    return reps
+
+
+def make_single_locus_figure(zip_path, save_path, x_max=100, extend_absorbed=True):
+    # 2x3: genetic load (top) and resistance allele frequency (bottom) vs
+    # generation, one column per functional resistance rate at the drive, each
+    # replicate drawn individually and translucent so overlapping runs build up.
+    # x_max: load peaks and collapses and resistance passes 90% within ~115
+    # generations in every combo; past that runs only creep toward fixation for
+    # up to ~2400 generations, which would squash the dynamics against the left edge
+    drives = [("dsx", "$s_d$ = 1", 1.0), ("s_d0.2", "$s_d$ = 0.2", 0.2)]
+    res_rates = [("res1e-5", "$10^{-5}$"), ("res1e-4", "$10^{-4}$"), ("res1e-3", "$10^{-3}$")]
+    colors = ["#2a78d6", "#eda100"]
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8.5), sharex=True)
+
+    for col, (res_folder, res_label) in enumerate(res_rates):
+        reps_by_drive = [load_single_locus_replicates(zip_path, drive_folder, res_folder)
+            for drive_folder, _, _ in drives]
+
+        for reps, color in zip(reps_by_drive, colors):
+            for rep in reps:
+                gens = rep["gen_num"].values
+                if extend_absorbed:
+                    # each run stops once the drive is fixed or lost, after which
+                    # its load and resistance frequency hold steady -- carry the
+                    # final values out to x_max so short runs (e.g. drive fixed
+                    # within ~15 gens) don't vanish at the left edge
+                    gens = np.append(gens, max(x_max, gens[-1]))
+                for ax, column in zip(axes[:, col], ["genetic_load", "resist_rate"]):
+                    values = rep[column].values
+                    if extend_absorbed:
+                        values = np.append(values, values[-1])
+                    ax.plot(gens, values, color=color, alpha=0.15, linewidth=1.5, zorder=3)
+
+        # maximum achievable load for each drive fitness cost
+        for (_, _, max_load), color in zip(drives, colors):
+            axes[0, col].axhline(max_load, color=color, linestyle="dashed", alpha=0.65, linewidth=2, zorder=2)
+
+        axes[0, col].set_title(f"Resistance rate = {res_label}", fontsize=16)
+        axes[1, col].set_xlabel("Generation", fontsize=14)
+        axes[1, col].set_xlim(0, x_max)
+        for ax in axes[:, col]:
+            ax.set_ylim(-0.02, 1.05)
+
+    axes[0, 0].set_ylabel("Genetic load", fontsize=14)
+    axes[1, 0].set_ylabel("Resistance frequency", fontsize=14)
+
+    # one legend for the whole figure, in panel A: drive fitness cost colors
+    # (drawn opaque -- the translucent line color would be hard to read in the
+    # legend) plus the realized/potential line-style key, in a single box placed
+    # in the empty space between the two max-load lines (the add_side_trajectory_legends
+    # stack anchors at the top, right on top of the load = 1 line)
+    handles = [Line2D([0], [0], color=color, linewidth=1.5) for color in colors]
+    handles += [Line2D([0], [0], color="black", linestyle="solid"), Line2D([0], [0], color="black", linestyle="dashed")]
+    labels = [label for _, label, _ in drives] + ["realized", "potential"]
+    axes[0, 2].legend(handles, labels, loc="upper right", bbox_to_anchor=(1.05, 0.95), frameon=True, framealpha=1.0,
+        fontsize=12)
+    for ax in axes.flat:
+        ax.tick_params(labelsize=12)
+
+    # w_pad/h_pad leave room between panels for the A-F labels, which sit a
+    # fixed offset left of / above each axes, so B/C and D-F aren't cramped
+    # against the neighboring panel's tick labels
+    fig.tight_layout(pad=0.15, w_pad=4.5, h_pad=4.0, rect=[0.02, 0, 0.995, 0.97])
     for label, ax in zip(string.ascii_uppercase, axes.flat):
         add_panel_label(fig, ax, label)
 
@@ -327,35 +437,28 @@ datasets = {
     "Cas9-r1-high": "data/Cas9-r1-high/updated-s-vs-n-Cas9-saturated-r1-high.csv",
 }
 
-# dfs = {}
-# for name, csv_path in datasets.items():
-#     dfs[name] = pd.read_csv(csv_path)
-#     save_dir = f"figures/{name}"
-#     os.makedirs(save_dir, exist_ok=True)
-#     make_combined_figure(dfs[name], f"data/{name}", save_dir)
-
-
-# # 2-panel figures spanning both r1 rates: vary-n-and-s trajectories, low vs high r1 rate
-# make_combined_n_and_s_figure(dfs["default"], "data/default", dfs["r1-high"], "data/r1-high",
-#     "figures/combined-vary-n-and-s-trajectories.pdf")
-# make_combined_n_and_s_figure(dfs["Cas9-default"], "data/Cas9-default", dfs["Cas9-r1-high"], "data/Cas9-r1-high",
-#     "figures/combined-vary-n-and-s-trajectories-Cas9.pdf")
-
-
 # heatmap figures across recombination rates, one row per rate from unlinked
 # (top) down to the lowest rate (bottom)
 recomb_rows = {
-    "0.5": ("Recombination rate = 0.5", dfs["default"]),
+    "0.5": ("Recombination rate = 0.5", pd.read_csv(datasets["default"])),
     **{exp: (f"Recombination rate = $10^{{-{exp}}}$", pd.read_csv(f"data/recomb10_{exp}-s-vs-n.csv"))
         for exp in ["4", "5", "7"]},
 }
+recomb_save_dir = "figures/recombination_rate_figures"
+os.makedirs(recomb_save_dir, exist_ok=True)
 
 # 3x2: unlinked, a middle rate, and the lowest rate -- compare 10^-4 vs 10^-5;
 # each gets its own output file
 for middle_rate in ["4", "5"]:
     make_recombination_heatmap_figure([recomb_rows[r] for r in ["0.5", middle_rate, "7"]],
-        f"figures/recombination-heatmaps-1e-{middle_rate}.pdf")
+        f"{recomb_save_dir}/recombination-heatmaps-1e-{middle_rate}.pdf")
 
 # 4x2: all four rates
 make_recombination_heatmap_figure([recomb_rows[r] for r in ["0.5", "4", "5", "7"]],
-    "figures/recombination-heatmaps-all.pdf")
+    f"{recomb_save_dir}/recombination-heatmaps-all.pdf")
+
+# 2x3 single-locus trajectories: genetic load and resistance allele frequency vs
+# generation, one column per functional resistance rate at the drive
+single_locus_save_dir = "figures/single_locus"
+os.makedirs(single_locus_save_dir, exist_ok=True)
+make_single_locus_figure("data/single-locus.zip", f"{single_locus_save_dir}/single-locus-trajectories.pdf")
