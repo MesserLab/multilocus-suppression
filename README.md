@@ -30,7 +30,7 @@ The SLiM file [WF_multilocus_cluster.slim](WF_multilocus_cluster.slim) was used 
 ### Varied parameters
 
 * `recomb_rate`: this is the recombination rate between target sites. We varied this across 0.5 (unlinked), 1e-2, 1e3, 1e-4, 1e-5, 1e-6, 1e-7
-* `resistance_rate`: this is the functional resistance rate at the drive locus. We varied this for the single-locus section across 1e-5, 1e-4, and 1e-3. For the multilocus drives, we set this parameter to 1e-2.
+* `resistance_rate`: this is the functional resistance rate at the drive locus. We varied this for the single-locus section across 1e-5, 1e-4, and 1e-3. For the multilocus drives, we set this parameter to 1e-3.
 * `drive_coeff`: this is the fitness cost of the drive allele. We set this to 1 or 0.2 for the single-locus section. For the multilocus drives, we set this parameter to 0.1
 * `drive_dom`: this is the dominance coefficient at the drive locus. We set this to 0.0 for the single-locus section and 0.5 for the multilocus section.
 * `num_target_loci`: this was varied throughout the paper. For the single-locus drives, we set this to 0 and for the multilocus drives, we explored 1,2,...,10.
