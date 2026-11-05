@@ -28,9 +28,9 @@ initialize(){
 	// constants for tracking output
 	defineCfgParam("recovery_val", 0.2); // genetic load signifying recovery
 	defineCfgParam("end_simulation_at_genetic_load_cutoff", 0); // whether to end the simulation when the genetic load falls below this
-	defineConstant("PLOT_HOMZ_COUNTS", F); // whether to liveplot the count of homozygous disrupted target sites each generation
-	defineConstant("PRINT_COMMON_HAPLOTYPES", F); // prints the most common haplotypes every generation 
-	defineConstant("NUM_HAPLOTYPES_PRINT", 10); // when PRINT_COMMON_HAPLOTYPES = T, only print the NUM_HAPLOTYPES_PRINT most common haplotypes
+	defineCfgParam("PLOT_HOMZ_COUNTS", F); // whether to liveplot the count of homozygous disrupted target sites each generation
+	defineCfgParam("PRINT_COMMON_HAPLOTYPES", F); // prints the most common haplotypes every generation
+	defineCfgParam("NUM_HAPLOTYPES_PRINT", 10); // when PRINT_COMMON_HAPLOTYPES = T, only print the NUM_HAPLOTYPES_PRINT most common haplotypes
 	
 	// constants based on other defined constants
 	defineConstant("cleavage_rate", ifelse(shared_cas9==1, baseline_cleavage_rate/((num_target_loci + 1)^(saturation_factor)), baseline_cleavage_rate/((num_target_loci)^(saturation_factor))));

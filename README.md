@@ -77,8 +77,16 @@ The SLiM file [WF_multilocus_cluster.slim](WF_multilocus_cluster.slim) was used 
   + Recombination rate = 10^-4: `data/recomb10_4-s-vs-n.csv`
   + Recombination rate = 0.5: `data/updated-s-vs-n-default.csv`
 
+* Data used for the log-jam haplotype figures are included in `data/log-jam-sims.zip`
+  + Ten replicate simulations (`log-jam-sim0.txt` to `log-jam-sim9.txt`) of the multilocus drive with tightly linked target sites, run with [log_jam_sims.sh](log_jam_sims.sh). Each `.txt` file is the SLiM console output, which includes the most common haplotypes in every generation. The matching SLiM `_output.csv` and `_parameters.txt` files are included as well.
+  + Parameters (all other parameters are at their defaults listed above):
+      * `recomb_rate=1e-7`
+      * `num_target_loci=4`
+      * `broken_coeff=0.1`
+      * `PRINT_COMMON_HAPLOTYPES=T` (with `NUM_HAPLOTYPES_PRINT=10`)
+
 ## Figures
 
-[figure-making.Rmd](figure-making.Rmd) shows how each plot in the paper was made. 
+[figure_making_RG.py](figure_making_RG.py) made the figures in `figures/Cas9_default_r1-high`, `figures/default_and_r1-high`, `figures/recombination_rate_figures`, and `figures/single_locus`.
 
-Plots were arranged in Adobe Illustrator 2025.
+[log_jam_figure.py](log_jam_figure.py) made the figures in `figures/log-jam-sims`.

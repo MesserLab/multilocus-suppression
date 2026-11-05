@@ -219,7 +219,7 @@ def add_side_trajectory_legends(ax, colors, value_labels, fixed_label=None, insi
     ax.legend(style_handles, style_labels, loc=loc, bbox_to_anchor=(anchor_x, style_y), frameon=True, framealpha=1.0)
 
 
-def make_combined_figure(df, data_dir, save_dir):
+def make_combined_figure(df, data_dir, save_path):
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     colors = ["#2a78d6", "#1baf7a", "#eda100"]
 
@@ -249,7 +249,7 @@ def make_combined_figure(df, data_dir, save_dir):
     for label, ax in zip(["A", "B", "C", "D"], axes.flat):
         add_panel_label(fig, ax, label)
 
-    fig.savefig(f"{save_dir}/combined-figure.pdf")
+    fig.savefig(save_path)
 
 
 def make_combined_n_and_s_figure(df_low, data_dir_low, df_high, data_dir_high, save_path):
@@ -428,14 +428,27 @@ def make_single_locus_figure(zip_path, save_path, x_max=100, extend_absorbed=Tru
     fig.savefig(save_path)
 
 
-# summary csv for each parameter set -- the key doubles as both the folder under
-# data/ holding its trajectory zips and the folder under figures/ to save into
+# summary csv for each parameter set -- the key is also the folder under data/
+# holding its trajectory zips
 datasets = {
     "default": "data/default/updated-s-vs-n-default.csv",
     "r1-high": "data/r1-high/updated-s-vs-n-r1-high.csv",
     "Cas9-default": "data/Cas9-default/updated-s-vs-n-Cas9-saturated.csv",
     "Cas9-r1-high": "data/Cas9-r1-high/updated-s-vs-n-Cas9-saturated-r1-high.csv",
 }
+dfs = {name: pd.read_csv(csv_path) for name, csv_path in datasets.items()}
+
+# 2x2 heatmap + trajectory figure for each parameter set, and the 2-panel
+# trajectories comparing the low and high r1 rates; without Cas9 saturation in
+# figures/default_and_r1-high, with it in figures/Cas9_default_r1-high
+for save_dir, prefix, low, high in [
+        ("figures/default_and_r1-high", "", "default", "r1-high"),
+        ("figures/Cas9_default_r1-high", "Cas9-", "Cas9-default", "Cas9-r1-high")]:
+    os.makedirs(save_dir, exist_ok=True)
+    make_combined_figure(dfs[low], f"data/{low}", f"{save_dir}/{prefix}default-figure.pdf")
+    make_combined_figure(dfs[high], f"data/{high}", f"{save_dir}/{prefix}r1-high-figure.pdf")
+    make_combined_n_and_s_figure(dfs[low], f"data/{low}", dfs[high], f"data/{high}",
+        f"{save_dir}/{prefix}combined-trajectories.pdf")
 
 # heatmap figures across recombination rates, one row per rate from unlinked
 # (top) down to the lowest rate (bottom)
